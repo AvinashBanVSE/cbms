@@ -98,6 +98,9 @@ final class BusinessClosureApproval
 
             abort_unless((int) $entity->lifecycle_version === $command['expected_version']
                 && in_array($state, BusinessLifecycle::TRANSITIONS[$entity->operational_state] ?? [], true), 409);
+            if ($state === 'Active' && $entity->operational_state === 'Pending Verification') {
+                abort_unless((bool) ($command['verification_confirmed'] ?? false), 422, 'Confirm that business verification has been completed.');
+            }
             if (collect($reviewers)->filter(fn (string $user): bool => $user !== $actor && $this->access->allows($user, 'business_structure.lifecycle'))->count() < (int) $policy->required_votes) {
                 throw ValidationException::withMessages(['approval' => 'The policy needs enough authorized reviewers other than the requester.']);
             }

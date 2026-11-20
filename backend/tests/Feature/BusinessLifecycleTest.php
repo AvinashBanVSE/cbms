@@ -119,6 +119,14 @@ final class BusinessLifecycleTest extends TestCase
             'business_id' => $portal, 'user_id' => $requester->id, 'permission' => 'business_structure.closure_policy',
         ]);
         $this->postJson($path.'/closure-policy', [...$policy, 'reviewers' => ['AA9999']])->assertUnprocessable();
+        $unverified = $this->business('Organization', null, 'Pending Verification');
+        $activation = "/api/v1/businesses/{$unverified}/lifecycle";
+        $this->postJson($activation.'/closure-policy', [...$policy, 'target_state' => 'Active'])->assertOk();
+        $command = $this->command('Active', 0);
+        $this->postJson($activation, $command)->assertUnprocessable();
+        $this->assertDatabaseMissing('business_closure_approvals', ['id' => $command['operation_id']]);
+        $this->postJson($activation, [...$command, 'verification_confirmed' => true])->assertAccepted();
+
         $second = Str::uuid7()->toString();
         DB::table('users')->insert(['id' => $second, 'code' => 'AA1938', 'email' => 'second-reviewer@example.test', 'password' => 'unused']);
         DB::table('portal_grants')->insert([...$permission, 'user_id' => $second]);
