@@ -30,6 +30,7 @@ final class PortalBootstrapTest extends TestCase
 
     public function test_owner_can_sign_in_and_read_catalogue_after_setup(): void
     {
+        config(['session.driver' => 'database']);
         $headers = ['X-Setup-Code' => self::CODE];
         $portal = ['legal_name' => 'Portal Operator', 'professional_name' => 'CBM'];
         $credentials = ['email' => 'owner@example.test', 'password' => 'Only-for-automated-tests-879'];
@@ -47,6 +48,9 @@ final class PortalBootstrapTest extends TestCase
         $this->postJson('/api/v1/login', ['code' => $owner->json('user_code'), ...$credentials, 'password' => 'invalid'])->assertUnauthorized();
         $this->assertDatabaseHas('portal_events', ['action' => 'login.failed']);
         $this->postJson('/api/v1/login', ['code' => $owner->json('user_code'), ...$credentials])->assertNoContent();
+        $this->assertDatabaseHas('sessions', [
+            'user_id' => DB::table('users')->where('code', $owner->json('user_code'))->value('id'),
+        ]);
         $this->getJson('/api/v1/services/categories')->assertOk()->assertJsonCount(15);
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');
