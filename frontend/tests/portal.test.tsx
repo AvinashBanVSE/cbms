@@ -305,6 +305,13 @@ it("records a reviewed legal identity and associates it with a business", async 
       expect(body).toEqual({ legal_identity_id: "legal-1" });
       return json(body);
     }
+    if (path === "legal-identities/verify-externally") {
+      expect(body).toEqual({
+        legal_name: "Legal A",
+        evidence_reference: "registry-1",
+      });
+      return json({ id: "registry-legal-1" });
+    }
     throw new Error(path);
   });
   await render();
@@ -323,6 +330,51 @@ it("records a reviewed legal identity and associates it with a business", async 
   input("legal_identity_id", "legal-1");
   await submit('form[data-operation="attach-legal-identity"]');
   expect(document.body.textContent).toContain("Legal identity associated.");
+  const method = document.querySelector<HTMLSelectElement>(
+    'form[data-operation="record-legal-identity"] select',
+  )!;
+  await act(async () => {
+    method.value = "external";
+    method.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  input("legal_name", "Legal A");
+  input("evidence_reference", "registry-1");
+  await submit('form[data-operation="record-legal-identity"]');
+  expect(document.body.textContent).toContain("registry-legal-1");
+});
+
+it("enrolls a required authenticator before opening the workspace", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      throw new PortalRequestError("Sign in", 401);
+    if (path === "login")
+      return Response.json(
+        { stage: "authenticator_enrollment_required" },
+        { status: 202 },
+      );
+    if (path === "authenticator/prepare")
+      return json({ setup_key: "REQUIRED-KEY" });
+    if (path === "authenticator/confirm") return json({ enabled: true });
+    throw new Error(path);
+  });
+  await render();
+  await submit();
+  expect(document.body.textContent).toContain(
+    "Your Organization requires authenticator setup",
+  );
+  expect(document.querySelector("nav")).toBeNull();
+  input("password", "test-password");
+  const settings = 'form[data-operation="authenticator-settings"]';
+  await submit(settings);
+  expect(document.body.textContent).toContain("REQUIRED-KEY");
+  input("password", "test-password");
+  input("code", "012345");
+  await submit(settings);
+  expect(document.body.textContent).toContain(
+    "Sign in with a new code from your app",
+  );
+  expect(document.querySelector("nav")).toBeNull();
 });
 
 it("opens only the assigned workspace without service catalogue access", async () => {
@@ -866,6 +918,9 @@ it("configures account setup and provisions an authorized Organization user", as
         if (!body) return json({ password_history_count: 5 });
         expect(body).toEqual({ password_history_count: 8 });
         return json(body);
+      case "tenants/tenant/mfa-policy":
+        expect(body).toEqual({ required: true, reason: "Security policy" });
+        return json({ required: true });
       case "tenants/tenant/organization-users":
         return json({ user_code: "AB1234", delivery: "failed" });
       case "tenants/tenant/organization-users/reissue":
@@ -894,6 +949,20 @@ it("configures account setup and provisions an authorized Organization user", as
   });
   await submit('form[data-operation="password-history-policy"]');
   expect(document.body.textContent).toContain("Password history policy saved");
+  const mfaForm = 'form[data-operation="organization-mfa-policy"]';
+  document.querySelector<HTMLInputElement>(
+    mfaForm + ' input[name="tenant"]',
+  )!.value = "tenant";
+  document.querySelector<HTMLSelectElement>(
+    mfaForm + ' select[name="required"]',
+  )!.value = "required";
+  document.querySelector<HTMLInputElement>(
+    mfaForm + ' input[name="reason"]',
+  )!.value = "Security policy";
+  await submit(mfaForm);
+  expect(document.body.textContent).toContain(
+    "Authenticator required for this Organization.",
+  );
   const policy = "form[data-operation=policy]";
   const resend = "form[data-operation=reissue]";
   const create = "form:not([data-operation])";

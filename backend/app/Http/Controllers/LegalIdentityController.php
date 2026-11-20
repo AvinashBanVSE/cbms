@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Domain\ExternalLegalIdentityVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -23,13 +24,29 @@ final class LegalIdentityController
             'evidence_reference' => 'required|string|max:200',
             'evidence_reviewed' => 'accepted',
         ]);
+
+        return $this->persist($data['legal_name'], $data['evidence_reference'], 'manual');
+    }
+
+    public function verifyExternally(Request $request, ExternalLegalIdentityVerifier $verifier): JsonResponse
+    {
+        $this->access->requirePermission('business_identity.verify');
+        $data = $request->validate(['legal_name' => 'required|string|max:200', 'evidence_reference' => 'required|string|max:200']);
+        $verifier->verify($data['legal_name'], $data['evidence_reference']);
+        $this->access->requirePermission('business_identity.verify');
+
+        return $this->persist($data['legal_name'], $data['evidence_reference'], 'external');
+    }
+
+    private function persist(string $name, string $reference, string $source): JsonResponse
+    {
         $id = Str::uuid7()->toString();
-        DB::transaction(function () use ($data, $id): void {
+        DB::transaction(function () use ($name, $reference, $source, $id): void {
             DB::table('legal_identities')->insert([
-                'id' => $id, 'legal_name' => $data['legal_name'], 'evidence_reference' => $data['evidence_reference'],
-                'verified_by' => Auth::id(), 'verified_at' => now(),
+                'id' => $id, 'legal_name' => $name, 'evidence_reference' => $reference,
+                'verified_by' => Auth::id(), 'verified_at' => now(), 'verification_source' => $source,
             ]);
-            $this->record('legal_identity.verified', $id, []);
+            $this->record('legal_identity.verified', $id, ['source' => $source]);
         });
 
         return response()->json(['id' => $id], 201)->header('Cache-Control', 'no-store');

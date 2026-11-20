@@ -4,6 +4,7 @@ import { portalRequest } from "./api";
 export function LegalIdentities() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [external, setExternal] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -14,13 +15,17 @@ export function LegalIdentities() {
       ? "businesses/" +
         encodeURIComponent(String(fields.get("business_id")).trim()) +
         "/legal-identity"
-      : "legal-identities";
+      : external
+        ? "legal-identities/verify-externally"
+        : "legal-identities";
     const body: Record<string, string | boolean> = attaching
       ? { legal_identity_id: String(fields.get("legal_identity_id")).trim() }
       : {
           legal_name: String(fields.get("legal_name")).trim(),
           evidence_reference: String(fields.get("evidence_reference")).trim(),
-          evidence_reviewed: fields.has("evidence_reviewed"),
+          ...(external
+            ? {}
+            : { evidence_reviewed: fields.has("evidence_reviewed") }),
         };
     setBusy(true);
     setNotice("");
@@ -51,9 +56,21 @@ export function LegalIdentities() {
           <input name="evidence_reference" required maxLength={200} />
         </label>
         <label>
-          <input name="evidence_reviewed" type="checkbox" required />I reviewed
-          the legal identity evidence
+          Verification method
+          <select
+            value={external ? "external" : "manual"}
+            onChange={(event) => setExternal(event.target.value === "external")}
+          >
+            <option value="manual">Record evidence review</option>
+            <option value="external">Verify with approved registry</option>
+          </select>
         </label>
+        {!external && (
+          <label>
+            <input name="evidence_reviewed" type="checkbox" required />I
+            reviewed the legal identity evidence
+          </label>
+        )}
         <button disabled={busy}>Record legal identity verification</button>
       </form>
       <form data-operation="attach-legal-identity" onSubmit={submit}>

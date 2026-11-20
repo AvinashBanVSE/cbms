@@ -1,8 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { portalRequest } from "./api";
 
-export function AuthenticatorSettings() {
-  const [enabled, setEnabled] = useState<boolean>();
+export function AuthenticatorSettings({
+  onEnrollment,
+}: { onEnrollment?: () => void } = {}) {
+  const [enabled, setEnabled] = useState<boolean | undefined>(
+    onEnrollment ? false : undefined,
+  );
   const [key, setKey] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,6 +34,7 @@ export function AuthenticatorSettings() {
       } else {
         setEnabled(result.enabled);
         setKey("");
+        if (operation === "confirm" && result.enabled) onEnrollment?.();
         if (operation)
           setNotice(
             result.enabled
@@ -51,7 +56,10 @@ export function AuthenticatorSettings() {
   }
 
   return (
-    <details className="authenticator-settings">
+    <details
+      className="authenticator-settings"
+      open={onEnrollment ? true : undefined}
+    >
       <summary>Authenticator settings</summary>
       {enabled === undefined ? (
         <button disabled={busy} onClick={() => run()}>

@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -92,6 +93,34 @@ final class BusinessStructureTest extends TestCase
         $this->getJson($check)->assertExactJson(['consistent' => false, 'business_ids' => [$shop]]);
         $this->getJson("/api/v1/businesses/{$shop}/ownership-check")->assertNotFound();
         $this->invalid(['kind' => 'Shop', 'parent_id' => $organization], 'legal_name');
+    }
+
+    public function test_external_legal_identity_verification_fails_closed(): void
+    {
+        $main = $this->authenticate(true);
+        $path = '/api/v1/legal-identities/verify-externally';
+        $input = ['legal_name' => 'Legal A', 'evidence_reference' => 'record-001'];
+        $this->postJson($path, $input)->assertForbidden();
+        DB::table('portal_grants')->insert([
+            'business_id' => $main, 'user_id' => User::where('code', 'AA0001')->value('id'), 'permission' => 'business_identity.verify',
+        ]);
+        Http::preventStrayRequests();
+        $this->postJson($path, $input)->assertServiceUnavailable();
+        config(['portal.legal_verifier_url' => 'https://registry.example.test/verify', 'portal.legal_verifier_token' => 'fake-test-token']);
+        Http::fake(['registry.example.test/verify' => Http::sequence()
+            ->push(['verified' => false])
+            ->push(['verified' => 'true'])
+            ->push(['verified' => true, ...$input, 'evidence_reference' => 'different-record'])
+            ->push(['verified' => true, ...$input])]);
+        $this->postJson($path, $input)->assertUnprocessable();
+        $this->postJson($path, $input)->assertServiceUnavailable();
+        $this->postJson($path, $input)->assertUnprocessable();
+        $this->assertDatabaseEmpty('legal_identities');
+        $id = $this->postJson($path, [...$input, 'url' => 'https://untrusted.example.test'])->assertCreated()->json('id');
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://registry.example.test/verify'
+            && $request->hasHeader('Authorization', 'Bearer fake-test-token') && $request->data() === $input);
+        $this->assertDatabaseHas('legal_identities', ['id' => $id, 'verification_source' => 'external']);
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'legal_identity.verified']);
     }
 
     private function authenticate(bool $allowed): string

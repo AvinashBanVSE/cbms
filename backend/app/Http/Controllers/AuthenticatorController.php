@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Accounts\Authenticator;
+use App\Accounts\OrganizationMfaPolicy;
+use App\Authorization\ProviderAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -26,7 +28,7 @@ final class AuthenticatorController
 
     public function prepare(Request $request): JsonResponse
     {
-        $user = $this->user();
+        $user = $this->enrollingUser($request);
         $data = $request->validate(['password' => 'required|string|max:72']);
         $this->requirePassword($user, $data['password']);
         abort_if(DB::table('user_authenticators')->where('user_id', $user)->whereNotNull('secret')->exists(), 409);
@@ -40,12 +42,13 @@ final class AuthenticatorController
 
     public function confirm(Request $request): JsonResponse
     {
-        $user = $this->user();
+        $user = $this->enrollingUser($request);
         $data = $request->validate(['password' => 'required|string|max:72', 'code' => 'required|regex:/^[0-9]{6}$/D']);
         $pending = $request->session()->get(self::PENDING);
         abort_unless(is_array($pending) && $pending['user'] === $user && $pending['expires_at'] > now()->timestamp, 409);
-        $version = DB::transaction(function () use ($user, $data, $pending): int {
+        $version = DB::transaction(function () use ($user, $data, $pending, $request): int {
             $this->requirePassword($user, $data['password'], lock: true);
+            $this->enrollingUser($request);
             $existing = DB::table('user_authenticators')->where('user_id', $user)->first();
             abort_if($existing?->secret !== null, 409);
             $step = Authenticator::step(Crypt::decryptString($pending['secret']), $data['code'], null);
@@ -58,7 +61,7 @@ final class AuthenticatorController
 
             return $version;
         }, attempts: 3);
-        $request->session()->forget(self::PENDING);
+        $request->session()->forget([self::PENDING, OrganizationMfaPolicy::ENROLLMENT_SESSION]);
         $request->session()->regenerate();
         $request->session()->put(Authenticator::SESSION_VERSION, $version);
 
@@ -71,6 +74,7 @@ final class AuthenticatorController
         $data = $request->validate(['password' => 'required|string|max:72', 'code' => 'required|regex:/^[0-9]{6}$/D']);
         $version = DB::transaction(function () use ($user, $data): int {
             $this->requirePassword($user, $data['password'], lock: true);
+            abort_if(OrganizationMfaPolicy::requires($user), 409, 'Your Organization requires an authenticator.');
             $credential = DB::table('user_authenticators')->where('user_id', $user)->whereNotNull('secret')->first();
             abort_if($credential === null, 409);
             abort_unless(Authenticator::consume($credential, $data['code']), 422, 'Enter a current authenticator code.');
@@ -99,6 +103,20 @@ final class AuthenticatorController
         abort_if($user === null, 401);
 
         return (string) $user;
+    }
+
+    private function enrollingUser(Request $request): string
+    {
+        if (Auth::check()) {
+            return $this->user();
+        }
+        $grant = $request->session()->get(OrganizationMfaPolicy::ENROLLMENT_SESSION);
+        abort_unless(is_array($grant) && $grant['expires_at'] > now()->timestamp, 401);
+        $account = ProviderAccess::sessionAccount($grant['user']);
+        abort_unless($account?->state === 'Active' && (int) $account->session_version === $grant['version']
+            && OrganizationMfaPolicy::requires($grant['user']), 401);
+
+        return $grant['user'];
     }
 
     private function status(bool $enabled): JsonResponse

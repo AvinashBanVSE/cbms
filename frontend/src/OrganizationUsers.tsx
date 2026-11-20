@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { OrganizationDelegations } from "./OrganizationDelegations";
 import { AccountRecovery } from "./AccountRecovery";
 import { CredentialSettings } from "./CredentialSettings";
+import { OrganizationMfaSettings } from "./OrganizationMfaSettings";
 import { OrganizationAccountLifecycle } from "./OrganizationAccountLifecycle";
 import { OrganizationRoles } from "./OrganizationRoles";
 import { portalRequest } from "./api";
@@ -403,6 +404,7 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
           </details>
           <AccountRecovery />
           <CredentialSettings />
+          <OrganizationMfaSettings />
           <OrganizationAccess />
           <OrganizationAccountLifecycle />
           <OrganizationDelegations />

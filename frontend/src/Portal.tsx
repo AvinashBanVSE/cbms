@@ -114,6 +114,7 @@ export function Portal() {
   const [section, setSection] = useState<AdministrationSection>();
   const [setupAccount, setSetupAccount] = useState(false);
   const [needsAuthenticator, setNeedsAuthenticator] = useState(false);
+  const [needsEnrollment, setNeedsEnrollment] = useState(false);
   const [stage, setStage] = useState<Stage>();
   const [categories, setCategories] = useState<Record<string, string>>();
   const [notice, setNotice] = useState("");
@@ -172,6 +173,13 @@ export function Portal() {
       if (stage === "ready") {
         const response = await portalRequest("login", body);
         if (response.status === 202) {
+          const challenge = await response.json();
+          if (challenge.stage === "authenticator_enrollment_required") {
+            setNeedsEnrollment(true);
+            setNeedsAuthenticator(false);
+            setNotice("Your Organization requires authenticator setup.");
+            return;
+          }
           setNeedsAuthenticator(true);
           setNotice("Enter the current code from your authenticator.");
           return;
@@ -352,7 +360,21 @@ export function Portal() {
           </>
         ) : (
           stage &&
-          (setupAccount ? (
+          (needsEnrollment ? (
+            <>
+              <AuthenticatorSettings
+                onEnrollment={() => {
+                  setNeedsEnrollment(false);
+                  setNotice(
+                    "Authenticator enabled. Sign in with a new code from your app.",
+                  );
+                }}
+              />
+              <button onClick={() => setNeedsEnrollment(false)}>
+                Back to sign in
+              </button>
+            </>
+          ) : setupAccount ? (
             <>
               <OrganizationAccountSetup
                 onDone={() => {

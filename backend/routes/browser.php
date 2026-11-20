@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Accounts\Authenticator;
+use App\Accounts\OrganizationMfaPolicy;
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\ProviderAccess;
@@ -22,6 +23,7 @@ use App\Http\Controllers\OrganizationAccessController;
 use App\Http\Controllers\OrganizationAccountLifecycleController;
 use App\Http\Controllers\OrganizationCredentialController;
 use App\Http\Controllers\OrganizationDelegationController;
+use App\Http\Controllers\OrganizationMfaController;
 use App\Http\Controllers\OrganizationRoleController;
 use App\Http\Controllers\OrganizationUserController;
 use App\Http\Controllers\ProviderUserController;
@@ -43,6 +45,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('authenticator/prepare', [AuthenticatorController::class, 'prepare'])->middleware('throttle:5,1,authenticator-prepare');
     Route::post('authenticator/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:5,1,authenticator-confirm');
     Route::post('authenticator/disable', [AuthenticatorController::class, 'disable'])->middleware('throttle:5,1,authenticator-disable');
+    Route::get('tenants/{tenant}/mfa-policy', [OrganizationMfaController::class, 'show'])->whereUuid('tenant');
+    Route::post('tenants/{tenant}/mfa-policy', [OrganizationMfaController::class, 'update'])->whereUuid('tenant');
     Route::get('credential-settings', [CredentialSettingsController::class, 'show']);
     Route::post('credential-settings', [CredentialSettingsController::class, 'update']);
     Route::get('provider-organizations', [ProviderUserController::class, 'organizations']);
@@ -57,6 +61,7 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
         Route::post('installation/owner', [InstallationController::class, 'owner'])->middleware('throttle:5,1,owner');
         Route::post('login', function (Request $request) {
+            $request->session()->forget(OrganizationMfaPolicy::ENROLLMENT_SESSION);
             $input = $request->validate([
                 'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email',
                 'password' => 'required|string',
@@ -69,11 +74,12 @@ Route::prefix('api/v1')->group(function (): void {
             $factorVersion = null;
             $needsCode = false;
             $factorThrottled = false;
-            $authenticated = DB::transaction(static function () use ($credentials, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled): bool {
+            $enrollment = null;
+            $authenticated = DB::transaction(static function () use ($credentials, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
                 // Serialize password checking and Laravel's optional rehash with credential changes.
                 DB::table('users')->where('code', $credentials['code'])->lockForUpdate()->first(['id']);
 
-                return Auth::attemptWhen($credentials, static function ($user) use ($code, &$version, &$factorVersion, &$needsCode, &$factorThrottled): bool {
+                return Auth::attemptWhen($credentials, static function ($user) use ($code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
                     $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
                     $version = $account === null ? null : (int) $account->session_version;
                     if ($account !== null && $account->state !== 'Active') {
@@ -82,6 +88,12 @@ Route::prefix('api/v1')->group(function (): void {
                     $factor = DB::table('user_authenticators')->where('user_id', $user->getAuthIdentifier())->first();
                     $factorVersion = $factor === null ? null : (int) $factor->version;
                     if ($factor?->secret === null) {
+                        if ($account !== null && OrganizationMfaPolicy::requires((string) $user->getAuthIdentifier())) {
+                            $enrollment = ['user' => (string) $user->getAuthIdentifier(), 'version' => $version, 'expires_at' => now()->addMinutes(5)->timestamp];
+
+                            return false;
+                        }
+
                         return true;
                     }
                     $needsCode = $code === null;
@@ -103,6 +115,14 @@ Route::prefix('api/v1')->group(function (): void {
                     return true;
                 });
             });
+            if ($enrollment !== null) {
+                Auth::logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+                $request->session()->put(OrganizationMfaPolicy::ENROLLMENT_SESSION, $enrollment);
+
+                return response()->json(['stage' => 'authenticator_enrollment_required'], 202)->header('Cache-Control', 'no-store');
+            }
             if ($needsCode) {
                 return response()->json(['stage' => 'authenticator_required'], 202)->header('Cache-Control', 'no-store');
             }
@@ -189,6 +209,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('businesses', [BusinessStructureController::class, 'index']);
     Route::post('businesses', [BusinessStructureController::class, 'store']);
     Route::post('legal-identities', [LegalIdentityController::class, 'store']);
+    Route::post('legal-identities/verify-externally', [LegalIdentityController::class, 'verifyExternally'])
+        ->middleware('throttle:10,1,external-legal-verification');
     Route::post('businesses/{business}/legal-identity', [LegalIdentityController::class, 'attach'])->whereUuid('business');
     Route::get('businesses/{organization}/ownership-check', [BusinessStructureController::class, 'checkOwnership'])->whereUuid('organization');
     Route::get('services', [ServiceRegistryController::class, 'index']);
