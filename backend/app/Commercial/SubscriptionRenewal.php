@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Commercial;
 
 use App\Configuration\GlobalBusinessSettings;
+use App\Jobs\ProcessSubscriptionRenewal;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -21,32 +22,61 @@ final class SubscriptionRenewal
     {
         $date = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE);
         $today = $date->toDateString();
-        $candidates = DB::table('commercial_subscriptions as term')->where(['term.renewal_mode' => 'automatic', 'term.state' => 'Active'])
+        $accounts = DB::table('commercial_subscriptions as term')
+            ->join('commercial_accounts as account', 'account.id', '=', 'term.account_id')
+            ->join('customer_tenants as tenant', function ($join): void {
+                $join->on('tenant.id', '=', 'account.tenant_id')->on('tenant.provider_id', '=', 'account.provider_id');
+            })
+            ->where('term.renewal_mode', 'automatic')
+            ->select('term.id', 'term.renewed_from_id', 'term.account_id', 'account.tenant_id', 'account.provider_id',
+                'term.ends_before', 'term.renewal_lead_days');
+        $candidates = (clone $accounts)->where('term.state', 'Active')
             ->where('term.starts_on', '<=', $today)->where('term.ends_before', '>', $date->subDays(3660)->toDateString())
             ->whereNotExists(fn ($query) => $query->from('commercial_subscriptions as renewal')->select('renewal.id')
                 ->whereColumn('renewal.renewed_from_id', 'term.id'));
-        foreach ($candidates->select('term.id')->lazyById(100, 'term.id', 'id') as $term) {
-            $this->prepare($term->id);
+        foreach ($candidates->lazyById(100, 'term.id', 'id') as $term) {
+            $start = CarbonImmutable::createFromFormat('!Y-m-d', $term->ends_before, GlobalBusinessSettings::BUSINESS_TIME_ZONE);
+            if ($date->gte($start->subDays((int) $term->renewal_lead_days))) {
+                ProcessSubscriptionRenewal::dispatch($term->id, $term->account_id, $term->tenant_id, $term->provider_id, null);
+            }
         }
 
-        $pending = DB::table('commercial_subscriptions')->where('renewal_mode', 'automatic')
-            ->whereIn('state', ['Pending Activation', 'Grace Period'])
-            ->whereNotNull('renewed_from_id')->where('starts_on', '<=', $today)->where('ends_before', '>', $today);
-        foreach ($pending->select('id', 'renewed_from_id')->lazyById(100) as $term) {
-            $this->applyRenewalPolicy($term->id, $term->renewed_from_id, $today);
+        $pending = $accounts->whereIn('term.state', ['Pending Activation', 'Grace Period'])
+            ->whereNotNull('term.renewed_from_id')->where('term.starts_on', '<=', $today)->where('term.ends_before', '>', $today);
+        foreach ($pending->lazyById(100, 'term.id', 'id') as $term) {
+            ProcessSubscriptionRenewal::dispatch($term->id, $term->account_id, $term->tenant_id, $term->provider_id, $term->renewed_from_id);
         }
     }
 
-    private function prepare(string $subscription, ?string $version = null, ?string $reason = null): ?array
+    public function processAutomatic(ProcessSubscriptionRenewal $job): void
+    {
+        if ($job->predecessor === null) {
+            $this->prepare($job->subscription, job: $job);
+
+            return;
+        }
+
+        $this->applyRenewalPolicy($job);
+    }
+
+    private function prepare(string $subscription, ?string $version = null, ?string $reason = null, ?ProcessSubscriptionRenewal $job = null): ?array
     {
         $automatic = $version === null;
 
-        return DB::transaction(function () use ($subscription, $version, $reason, $automatic): ?array {
+        return DB::transaction(function () use ($subscription, $version, $reason, $automatic, $job): ?array {
             $account = $this->account($subscription);
+            if ($job !== null && ! $this->matchesJob($account, $job)) {
+                return null;
+            }
             abort_if($account === null, 404);
             $tenant = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->first();
             $organization = DB::table('business_identities')->where('id', $tenant->organization_id)->lockForUpdate()->first();
-            $previous = DB::table('commercial_subscriptions')->where('id', $subscription)->lockForUpdate()->first();
+            $previous = DB::table('commercial_subscriptions')->where(['id' => $subscription, 'account_id' => $account->id])->lockForUpdate()->first();
+            if ($previous === null) {
+                abort_unless($automatic, 409, 'The Subscription context has changed.');
+
+                return null;
+            }
             $existing = DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)->lockForUpdate()->first();
             if ($automatic && ($existing !== null || $previous->renewal_mode !== 'automatic')) {
                 return null;
@@ -115,11 +145,14 @@ final class SubscriptionRenewal
         }, attempts: 3);
     }
 
-    private function applyRenewalPolicy(string $renewal, string $previous, string $today): void
+    private function applyRenewalPolicy(ProcessSubscriptionRenewal $job): void
     {
-        DB::transaction(function () use ($renewal, $previous, $today): void {
+        DB::transaction(function () use ($job): void {
+            $renewal = $job->subscription;
+            $previous = $job->predecessor;
+            $today = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
             $account = $this->account($renewal);
-            if ($account === null) {
+            if (! $this->matchesJob($account, $job)) {
                 return;
             }
             $tenant = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->first();
@@ -153,6 +186,12 @@ final class SubscriptionRenewal
                 'tenant_id' => $tenant->id, 'provider_id' => $account->provider_id,
             ]);
         }, attempts: 3);
+    }
+
+    private function matchesJob(?object $account, ProcessSubscriptionRenewal $job): bool
+    {
+        return $account !== null && $account->id === $job->account
+            && $account->tenant_id === $job->tenant && $account->provider_id === $job->provider;
     }
 
     private function account(string $subscription): ?object

@@ -195,6 +195,9 @@ Route::prefix('api/v1')->group(function (): void {
         ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');
+    Route::post('businesses/{business}/lifecycle/closure-policy', [BusinessLifecycleController::class, 'closurePolicy'])->whereUuid('business');
+    Route::get('businesses/{business}/lifecycle/closure-approvals', [BusinessLifecycleController::class, 'pendingClosures'])->whereUuid('business');
+    Route::post('businesses/{business}/lifecycle/closure-approvals/{approval}', [BusinessLifecycleController::class, 'decideClosure'])->whereUuid(['business', 'approval']);
     Route::prefix('commercial')->group(function (): void {
         Route::get('invoices', [CommercialBillingController::class, 'index']);
         Route::post('invoices', [CommercialBillingController::class, 'invoice']);

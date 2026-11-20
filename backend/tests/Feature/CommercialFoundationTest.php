@@ -8,6 +8,7 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -119,7 +120,23 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseMissing('commercial_subscriptions', ['renewed_from_id' => $subscription]);
 
         $this->travelTo(CarbonImmutable::parse('2032-03-24', 'Asia/Kolkata'));
+        config(['queue.default' => 'database']);
+        $account = DB::table('commercial_accounts')->where('id', $input['account_id'])->first();
         $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseCount('jobs', 1);
+        $this->assertDatabaseMissing('commercial_subscriptions', ['renewed_from_id' => $subscription]);
+        $otherProvider = DB::table('portal_installation')->value('portal_id');
+        DB::table('customer_tenants')->where('id', $account->tenant_id)->update(['provider_id' => $otherProvider]);
+        Queue::connection('database')->pop()->fire();
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertDatabaseMissing('commercial_subscriptions', ['renewed_from_id' => $subscription]);
+        DB::table('customer_tenants')->where('id', $account->tenant_id)->update(['provider_id' => $account->provider_id]);
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseCount('jobs', 1);
+        Queue::connection('database')->pop()->fire();
+        $this->assertDatabaseCount('jobs', 0);
+        config(['queue.default' => 'sync']);
         $next = DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)->first();
         $this->assertSame('2032-03-29', $next->starts_on);
         $this->assertSame('automatic', $next->renewal_mode);

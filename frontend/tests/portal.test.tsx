@@ -1623,6 +1623,86 @@ it("manages an Organization account state independently of business access", asy
   expect(document.body.textContent).toContain("Account unavailable");
 });
 
+it("submits and reviews a governed business closure", async () => {
+  const path = "businesses/business-1/lifecycle";
+  let pending = false;
+  request.mockImplementation(async (url, body) => {
+    if (url === "installation") return json({ stage: "ready" });
+    if (url === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["businesses"] });
+    if (url === "businesses?page=1")
+      return json({
+        data: [
+          {
+            id: "business-1",
+            kind: "Shop",
+            professional_name: "Shop",
+            legal_name: null,
+            parent_id: null,
+            provider_id: null,
+            tenant_id: null,
+            owners: [],
+          },
+        ],
+      });
+    if (url === path && !body)
+      return json({
+        state: "Active",
+        version: 0,
+        allowed_transitions: ["Closed"],
+        can_configure_closure: true,
+      });
+    if (url === path + "/closure-policy") {
+      expect(body).toEqual({ reviewers: ["AA1234"], expiry_minutes: 60 });
+      return json({ reviewer_count: 1 });
+    }
+    if (url === path) {
+      expect(body).toMatchObject({
+        state: "Closed",
+        expected_version: 0,
+        reason: "Confirmed closure",
+      });
+      pending = true;
+      return json({ status: "pending", approval_id: "approval-1" });
+    }
+    if (url === path + "/closure-approvals?page=1")
+      return json({
+        data: pending
+          ? [
+              {
+                id: "approval-1",
+                reason: "Confirmed closure",
+                expires_at: "2032-03-29T09:00:00Z",
+              },
+            ]
+          : [],
+      });
+    if (url === path + "/closure-approvals/approval-1") {
+      expect(body).toEqual({ decision: "approve" });
+      pending = false;
+      return json({ status: "approved", state: "Closed" });
+    }
+    throw new Error(url);
+  });
+  await render();
+  await click("Load business state");
+  input("reviewers", "AA1234");
+  input("expiry_minutes", "60");
+  await submit('form[data-operation="business-closure-policy"]');
+  expect(document.body.textContent).toContain("Closure approval policy saved.");
+  document.querySelector<HTMLTextAreaElement>(
+    'form[data-operation="business-lifecycle"] textarea[name="reason"]',
+  )!.value = "Confirmed closure";
+  await submit('form[data-operation="business-lifecycle"]');
+  expect(document.body.textContent).toContain(
+    "Closure awaiting approval: approval-1",
+  );
+  await click("Load closure requests");
+  expect(document.body.textContent).toContain("Confirmed closure");
+  await click("Approve closure");
+  expect(document.body.textContent).toContain("Closure request approved.");
+});
+
 it("applies a business lifecycle transition and refreshes the business directory", async () => {
   const path = "businesses/test-org/lifecycle";
   let state = "Active";

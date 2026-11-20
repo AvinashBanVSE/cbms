@@ -101,6 +101,63 @@ final class BusinessLifecycleTest extends TestCase
         $this->getJson($parent)->assertJsonPath('allowed_transitions', []);
     }
 
+    public function test_configured_closure_requires_an_independent_current_authorized_reviewer(): void
+    {
+        $business = $this->business('Organization');
+        $other = $this->business('Organization');
+        $this->authenticate();
+        $requester = User::where('code', 'AA1932')->firstOrFail();
+        $portal = DB::table('portal_installation')->value('portal_id');
+        $reviewer = Str::uuid7()->toString();
+        DB::table('users')->insert(['id' => $reviewer, 'code' => 'AA1933', 'email' => 'reviewer@example.test', 'password' => 'unused']);
+        $permission = ['business_id' => $portal, 'user_id' => $reviewer, 'permission' => 'business_structure.lifecycle'];
+        DB::table('portal_grants')->insert($permission);
+        $path = "/api/v1/businesses/{$business}/lifecycle";
+        $policy = ['reviewers' => ['AA1933'], 'expiry_minutes' => 1];
+        $this->postJson($path.'/closure-policy', $policy)->assertForbidden();
+        DB::table('portal_grants')->insert([
+            'business_id' => $portal, 'user_id' => $requester->id, 'permission' => 'business_structure.closure_policy',
+        ]);
+        $this->postJson($path.'/closure-policy', [...$policy, 'reviewers' => ['AA9999']])->assertUnprocessable();
+        $this->postJson($path.'/closure-policy', $policy)->assertExactJson(['reviewer_count' => 1]);
+        $this->freezeSecond();
+        $first = $this->command('Closed', 0);
+        $this->postJson($path, $first)->assertAccepted()->assertJsonPath('approval_id', $first['operation_id']);
+        $this->postJson($path, $first)->assertAccepted()->assertJsonPath('approval_id', $first['operation_id']);
+        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonPath('data.0.id', $first['operation_id']);
+        $decision = $path.'/closure-approvals/'.$first['operation_id'];
+        $this->postJson($decision, ['decision' => 'approve'])->assertForbidden();
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson(str_replace($business, $other, $decision), ['decision' => 'approve'])->assertNotFound();
+        $this->travel(1)->minute();
+        $this->postJson($decision, ['decision' => 'approve'])->assertConflict()->assertJsonPath('status', 'expired');
+
+        $this->actingAs($requester);
+        $stale = $this->command('Closed', 0);
+        $this->postJson($path, $stale)->assertAccepted();
+        $this->postJson($path, $this->command('Suspended', 0))->assertOk();
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($path.'/closure-approvals/'.$stale['operation_id'], ['decision' => 'approve'])
+            ->assertConflict()->assertJsonPath('status', 'stale');
+
+        $this->actingAs($requester);
+        $fresh = $this->command('Closed', 1);
+        $this->postJson($path, $fresh)->assertAccepted();
+        $decision = $path.'/closure-approvals/'.$fresh['operation_id'];
+        $this->actingAs(User::findOrFail($reviewer));
+        DB::table('portal_grants')->where($permission)->delete();
+        $this->postJson($decision, ['decision' => 'approve'])->assertForbidden();
+        $this->assertDatabaseHas('business_identities', ['id' => $business, 'operational_state' => 'Suspended']);
+        DB::table('portal_grants')->insert($permission);
+        $this->postJson($decision, ['decision' => 'approve'])->assertOk()->assertJsonPath('status', 'approved')->assertJsonPath('state', 'Closed');
+        $this->postJson($decision, ['decision' => 'approve'])->assertConflict();
+        $this->actingAs($requester);
+        $this->postJson($path, $fresh)->assertOk()->assertJsonPath('state', 'Closed');
+        $this->assertDatabaseHas('portal_events', [
+            'action' => 'business.closure_approval_finished', 'subject_id' => $fresh['operation_id'], 'actor_id' => $reviewer,
+        ]);
+    }
+
     private function authenticate(): void
     {
         $portal = $this->business('Main Portal');
