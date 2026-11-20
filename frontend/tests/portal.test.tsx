@@ -13,6 +13,7 @@ const request = vi.mocked(portalRequest);
 let root: Root;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  localStorage.clear();
   document.body.innerHTML = '<div id="root"></div>';
   root = createRoot(document.querySelector("#root")!);
   request.mockReset();
@@ -43,6 +44,70 @@ async function click(text: string) {
   await act(async () => button!.click());
 }
 const json = (data: unknown) => Response.json(data);
+
+it("keeps dashboard appearance preferences after a reload", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    throw new Error(path);
+  });
+  localStorage.setItem("cbm.appearance", '{"theme":"unknown","font":"serif"}');
+  await render();
+  const portal = () => document.querySelector<HTMLDivElement>(".portal")!;
+  expect(portal().dataset.theme).toBe("system");
+  expect(portal().style.fontFamily).toBe("serif");
+  const choose = (name: string, value: string) =>
+    act(async () => {
+      const control = document.querySelector<HTMLSelectElement>(
+        `header select[name="${name}"]`,
+      )!;
+      control.value = value;
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  await choose("theme", "dark");
+  await choose("font", "monospace");
+  await choose("layout", "full");
+  await choose("navigation", "sidebar");
+  await act(async () => root.unmount());
+  root = createRoot(document.querySelector("#root")!);
+  await render();
+  expect(portal().dataset.theme).toBe("dark");
+  expect(portal().style.fontFamily).toBe("monospace");
+  expect(portal().querySelector(":scope > .full")).not.toBeNull();
+  expect(
+    portal().querySelector('[data-navigation="sidebar"] nav'),
+  ).not.toBeNull();
+  await click("Businesses");
+  expect(portal().querySelector("nav [aria-pressed=true]")?.textContent).toBe(
+    "Businesses",
+  );
+});
+
+it("uses appearance preferences even when persistent storage fails", async () => {
+  localStorage.setItem("cbm.appearance", "unreadable");
+  request.mockResolvedValue(json({ stage: "setup_required" }));
+  await render();
+  const storage = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+    });
+  try {
+    await act(async () => {
+      const control = document.querySelector<HTMLSelectElement>(
+        'header select[name="theme"]',
+      )!;
+      control.value = "light";
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(document.querySelector(".portal")?.getAttribute("data-theme")).toBe(
+      "light",
+    );
+  } finally {
+    storage.mockRestore();
+  }
+});
 
 it("configures the portal, creates its owner, signs in, manages a service and signs out", async () => {
   let page = 1;

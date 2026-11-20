@@ -35,6 +35,54 @@ const titles = {
   ready: "Sign in",
 };
 
+const appearanceOptions = {
+  theme: [
+    ["system", "System"],
+    ["light", "Light"],
+    ["dark", "Dark"],
+  ],
+  layout: [
+    ["compact", "Compact"],
+    ["full", "Full width"],
+  ],
+  font: [
+    ["system-ui", "System"],
+    ["serif", "Serif"],
+    ["monospace", "Monospace"],
+  ],
+  navigation: [
+    ["top", "Top bar"],
+    ["sidebar", "Sidebar"],
+  ],
+} as const;
+type AppearanceKey = keyof typeof appearanceOptions;
+type Appearance = Record<AppearanceKey, string>;
+const appearanceKeys = Object.keys(appearanceOptions) as AppearanceKey[];
+const appearanceStorageKey = "cbm.appearance";
+const defaultAppearance: Appearance = {
+  theme: "system",
+  layout: "compact",
+  font: "system-ui",
+  navigation: "top",
+};
+
+function loadAppearance(): Appearance {
+  try {
+    const saved: Partial<Appearance> | null = JSON.parse(
+      localStorage.getItem(appearanceStorageKey) ?? "null",
+    );
+    const appearance = { ...defaultAppearance };
+    for (const key of appearanceKeys) {
+      const value = saved?.[key];
+      if (value && appearanceOptions[key].some(([option]) => option === value))
+        appearance[key] = value;
+    }
+    return appearance;
+  } catch {
+    return defaultAppearance;
+  }
+}
+
 export function Portal() {
   const [delegations, setDelegations] = useState<ActiveAccessDelegation[]>([]);
   const [mappingContexts, setMappingContexts] = useState<MappingContext[]>([]);
@@ -44,9 +92,19 @@ export function Portal() {
   const [categories, setCategories] = useState<Record<string, string>>();
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [theme, setTheme] = useState("system");
-  const [layout, setLayout] = useState("compact");
-  const [font, setFont] = useState("system-ui");
+  const [appearance, setAppearance] = useState(loadAppearance);
+  const { theme, layout, font, navigation } = appearance;
+
+  function changeAppearance(key: AppearanceKey, value: string) {
+    const next = { ...appearance, [key]: value };
+    setAppearance(next);
+    try {
+      localStorage.setItem(appearanceStorageKey, JSON.stringify(next));
+    } catch {
+      // Keep the selection in memory when browser storage is unavailable.
+    }
+  }
+
   async function loadCatalogue() {
     try {
       setCategories(await (await portalRequest("services/categories")).json());
@@ -111,26 +169,30 @@ export function Portal() {
   }
   return (
     <div className="portal" data-theme={theme} style={{ fontFamily: font }}>
-      <header>
+      <header className="portal-header">
         <strong>CBM Portal</strong>
         <details>
           <summary>Appearance</summary>
-          {(
-            [
-              ["Theme", theme, setTheme, ["system", "light", "dark"]],
-              ["Layout", layout, setLayout, ["compact", "full"]],
-              ["Font", font, setFont, ["system-ui", "serif", "monospace"]],
-            ] as const
-          ).map(([label, value, set, options]) => (
-            <label key={label}>
-              {label}
-              <select value={value} onChange={(e) => set(e.target.value)}>
-                {options.map((o) => (
-                  <option key={o}>{o}</option>
-                ))}
-              </select>
-            </label>
-          ))}
+          <div className="appearance-options">
+            {appearanceKeys.map((key) => (
+              <label key={key}>
+                {key[0].toUpperCase() + key.slice(1)}
+                <select
+                  name={key}
+                  value={appearance[key]}
+                  onChange={(event) =>
+                    changeAppearance(key, event.target.value)
+                  }
+                >
+                  {appearanceOptions[key].map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
         </details>
       </header>
       <section className={layout}>
@@ -174,7 +236,7 @@ export function Portal() {
               <MappingWorkspace contexts={mappingContexts} />
             ) : (
               categories && (
-                <>
+                <div className="workspace" data-navigation={navigation}>
                   <nav aria-label="Administration">
                     <button
                       aria-pressed={section === "services"}
@@ -201,16 +263,21 @@ export function Portal() {
                       Commercial
                     </button>
                   </nav>
-                  {section === "commercial" ? (
-                    <CommercialWorkspace />
-                  ) : section === "users" ? (
-                    <OrganizationUsers />
-                  ) : section === "businesses" ? (
-                    <BusinessDirectory />
-                  ) : (
-                    <ServiceRegistry categories={categories} />
-                  )}
-                </>
+                  <section
+                    className="workspace-content"
+                    aria-label="Administration workspace"
+                  >
+                    {section === "commercial" ? (
+                      <CommercialWorkspace />
+                    ) : section === "users" ? (
+                      <OrganizationUsers />
+                    ) : section === "businesses" ? (
+                      <BusinessDirectory />
+                    ) : (
+                      <ServiceRegistry categories={categories} />
+                    )}
+                  </section>
+                </div>
               )
             )}
             <button
