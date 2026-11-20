@@ -7,6 +7,7 @@ use App\Authorization\MainPortalAccess;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
+use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\OrganizationAccessController;
@@ -86,12 +87,19 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');
     Route::prefix('commercial')->group(function (): void {
+        Route::get('invoices', [CommercialBillingController::class, 'index']);
+        Route::post('invoices', [CommercialBillingController::class, 'invoice']);
+        Route::get('invoices/{invoice}/payments', [CommercialBillingController::class, 'payments'])->whereUuid('invoice');
+        Route::post('invoices/{invoice}/payments', [CommercialBillingController::class, 'payment'])->whereUuid('invoice');
+        Route::post('invoices/{invoice}/payments/{payment}/reverse', [CommercialBillingController::class, 'reverse'])->whereUuid(['invoice', 'payment']);
         Route::get('/', [CommercialController::class, 'index']);
         Route::post('accounts', [CommercialController::class, 'account']);
         Route::post('entitlements', [CommercialController::class, 'entitlement']);
         Route::post('plans', [CommercialController::class, 'plan']);
         Route::post('plans/{plan}/versions', [CommercialController::class, 'publish'])->whereUuid('plan');
         Route::post('subscriptions', [CommercialController::class, 'subscription']);
+        Route::post('subscriptions/{subscription}/transition', [CommercialController::class, 'transition'])->whereUuid('subscription');
+        Route::get('businesses/{business}/effective-entitlements', [CommercialController::class, 'effectiveEntitlements'])->whereUuid('business');
     });
     Route::post('provider-migrations/preview', [ServiceProviderMigrationController::class, 'preview']);
     Route::post('provider-migrations/execute', [ServiceProviderMigrationController::class, 'execute']);

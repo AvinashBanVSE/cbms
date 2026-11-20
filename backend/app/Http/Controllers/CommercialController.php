@@ -32,7 +32,8 @@ final class CommercialController
             ? DB::table('commercial_subscription_coverage')->whereIn('subscription_id', $result->getCollection()->pluck('id'))
                 ->orderBy('business_id')->get()->groupBy('subscription_id')
             : collect();
-        $result->through(function (object $row) use ($section, $coverage): object {
+        $today = now('Asia/Kolkata')->toDateString();
+        $result->through(function (object $row) use ($section, $coverage, $today): object {
             if ($section === 'versions') {
                 $row->currency = 'INR';
                 $row->entitlements = json_decode($row->entitlements, true, flags: JSON_THROW_ON_ERROR);
@@ -40,6 +41,7 @@ final class CommercialController
             }
             if ($section === 'subscriptions') {
                 $row->covered_business_ids = $coverage->get($row->id, collect())->pluck('business_id')->all();
+                $row->effective_state = $row->state !== 'Cancelled' && $row->ends_before <= $today ? 'Expired' : $row->state;
             }
 
             return $row;
@@ -169,6 +171,83 @@ final class CommercialController
 
             return response()->json(['id' => $id, 'state' => 'Pending Activation'], 201);
         }, attempts: 3);
+    }
+
+    public function transition(Request $request, string $subscription): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $data = $request->validate([
+            'action' => 'required|in:activate,suspend,cancel',
+            'expected_state' => 'required|in:Pending Activation,Active,Suspended',
+            'reason' => 'required|string|max:500',
+        ]);
+
+        return DB::transaction(function () use ($subscription, $data): JsonResponse {
+            $account = DB::table('commercial_subscriptions as subscription')
+                ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
+                ->where('subscription.id', $subscription)->first(['account.tenant_id', 'account.provider_id']);
+            abort_if($account === null, 404);
+            $provider = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->value('provider_id');
+            $record = DB::table('commercial_subscriptions')->where('id', $subscription)->lockForUpdate()->first();
+            $today = now('Asia/Kolkata')->toDateString();
+            abort_unless($record->state === $data['expected_state'], 409, 'The Subscription state changed. Reload the commercial records.');
+            abort_if($record->ends_before <= $today, 409, 'The Subscription term has ended.');
+
+            [$allowed, $next] = match ($data['action']) {
+                'activate' => [['Pending Activation', 'Suspended'], 'Active'],
+                'suspend' => [['Active'], 'Suspended'],
+                'cancel' => [['Pending Activation', 'Active', 'Suspended'], 'Cancelled'],
+            };
+            abort_unless(in_array($record->state, $allowed, true), 409, 'This action is unavailable in the current Subscription state.');
+
+            if ($next === 'Active') {
+                abort_unless($provider === $account->provider_id, 409, 'This agreement requires a separate commercial transition.');
+                abort_if($today < $record->starts_on, 409, 'The Subscription term has yet to start.');
+                $invoice = DB::table('commercial_invoices')->where('subscription_id', $subscription)->lockForUpdate()->first();
+                abort_if($invoice === null, 409, 'Issue the term invoice before activation.');
+                $paid = (int) DB::table('commercial_billing_ledger')->where('invoice_id', $invoice->id)
+                    ->lockForUpdate()->pluck('delta_paise')->sum();
+                abort_unless($paid === (int) $invoice->amount_paise, 409, 'Settle the term invoice before activation.');
+            }
+
+            DB::table('commercial_subscriptions')->where('id', $subscription)->update(['state' => $next]);
+            $this->audit('commercial.subscription_state_changed', $subscription, [
+                'from' => $record->state, 'to' => $next, 'reason' => $data['reason'],
+            ]);
+
+            return response()->json(['id' => $subscription, 'state' => $next]);
+        }, attempts: 3);
+    }
+
+    public function effectiveEntitlements(string $business): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $identity = DB::table('business_identities')->where('id', $business)
+            ->whereIn('kind', ['Organization', 'Distributor', 'Shop'])->first(['id', 'kind', 'parent_id']);
+        abort_if($identity === null, 404);
+        $organization = $identity->kind === 'Organization' ? $identity->id : $identity->parent_id;
+        $today = now('Asia/Kolkata')->toDateString();
+        $eligibleVersions = DB::table('commercial_subscription_coverage as coverage')
+            ->join('commercial_subscriptions as subscription', 'subscription.id', '=', 'coverage.subscription_id')
+            ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
+            ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
+            ->where('tenant.organization_id', $organization)->where('coverage.business_id', $business)
+            ->whereIn('subscription.state', ['Active', 'Trial'])->where('subscription.starts_on', '<=', $today)
+            ->where('subscription.ends_before', '>', $today)->select('subscription.plan_version_id');
+        $plans = DB::table('commercial_plan_versions')->whereIn('id', $eligibleVersions)->cursor();
+
+        $features = [];
+        foreach ($plans as $plan) {
+            foreach (json_decode($plan->entitlements, true, flags: JSON_THROW_ON_ERROR) as $entitlement) {
+                if ($entitlement['type'] === 'feature' && $entitlement['composition'] === 'any') {
+                    $features[$entitlement['code']] = true;
+                }
+            }
+        }
+        ksort($features, SORT_STRING);
+
+        return response()->json(['business_id' => $business, 'feature_codes' => array_keys($features)])
+            ->header('Cache-Control', 'no-store');
     }
 
     private function create(string $table, array $data, string $action): JsonResponse

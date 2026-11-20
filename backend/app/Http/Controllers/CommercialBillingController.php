@@ -1,0 +1,175 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Authorization\MainPortalAccess;
+use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+final class CommercialBillingController
+{
+    public function __construct(private readonly MainPortalAccess $access) {}
+
+    public function index(): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $invoices = DB::table('commercial_invoices')->orderBy('id')->simplePaginate(30);
+        $totals = DB::table('commercial_billing_ledger')->whereIn('invoice_id', $invoices->getCollection()->pluck('id'))
+            ->groupBy('invoice_id')->selectRaw('invoice_id, SUM(delta_paise) AS paid')->pluck('paid', 'invoice_id');
+        $invoices->through(fn (object $invoice): array => $this->balance($invoice, (int) ($totals[$invoice->id] ?? 0)));
+
+        return response()->json($invoices)->header('Cache-Control', 'no-store');
+    }
+
+    public function invoice(Request $request): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $today = now('Asia/Kolkata')->toDateString();
+        $data = $request->validate([
+            'subscription_id' => 'required|uuid',
+            'due_on' => 'required|date_format:Y-m-d',
+        ]);
+
+        return DB::transaction(function () use ($data, $today): JsonResponse {
+            $subscription = DB::table('commercial_subscriptions')->where('id', $data['subscription_id'])->lockForUpdate()->first();
+            abort_if($subscription === null, 404);
+            $prior = DB::table('commercial_invoices')->where('subscription_id', $subscription->id)->first();
+            if ($prior !== null) {
+                abort_unless($prior->due_on === $data['due_on'], 409);
+
+                return response()->json($this->balance($prior, $this->paid($prior->id)));
+            }
+            abort_if($data['due_on'] < $today, 422, 'The payment due date must be today or later.');
+            abort_unless(in_array($subscription->state, ['Pending Activation', 'Trial', 'Active'], true), 409);
+            $charge = DB::table('commercial_plan_versions')->where('id', $subscription->plan_version_id)->value('amount_paise');
+            abort_if($charge === null, 409);
+            $row = [
+                'id' => Str::uuid7()->toString(), 'subscription_id' => $subscription->id,
+                'amount_paise' => (int) $charge, 'issued_on' => $today, 'due_on' => $data['due_on'],
+            ];
+            DB::table('commercial_invoices')->insert($row);
+            $this->audit('commercial.invoice_issued', $row['id'], ['subscription_id' => $subscription->id, 'amount_paise' => (int) $charge]);
+
+            return response()->json($this->balance((object) $row, 0), 201);
+        }, attempts: 3);
+    }
+
+    public function payments(string $invoice): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $row = $this->findInvoice($invoice, false);
+        $history = DB::table('commercial_billing_ledger as entry')
+            ->join('commercial_payments as payment', 'payment.id', '=', 'entry.payment_id')
+            ->where('entry.invoice_id', $invoice)->orderBy('entry.id')->simplePaginate(30, [
+                'entry.id', 'entry.payment_id', 'entry.entry_type', 'entry.delta_paise', 'entry.recorded_at', 'payment.receipt_reference',
+            ]);
+        $history->through(static function (object $entry): object {
+            $entry->recorded_at = CarbonImmutable::parse($entry->recorded_at, 'UTC')->utc()->toISOString();
+
+            return $entry;
+        });
+
+        return response()->json(['invoice' => $this->balance($row, $this->paid($invoice)), 'history' => $history])
+            ->header('Cache-Control', 'no-store');
+    }
+
+    public function payment(Request $request, string $invoice): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $data = $request->validate([
+            'amount_paise' => 'required|integer|min:1|max:999999999999',
+            'receipt_reference' => 'required|string|max:120',
+        ]);
+        $amount = (int) $data['amount_paise'];
+
+        return DB::transaction(function () use ($invoice, $data, $amount): JsonResponse {
+            $row = $this->findInvoice($invoice, true);
+            $paid = $this->paid($invoice);
+            $existing = DB::table('commercial_payments')->where('invoice_id', $invoice)
+                ->where('receipt_reference', $data['receipt_reference'])->first();
+            if ($existing) {
+                abort_unless((int) $existing->amount_paise === $amount, 409);
+
+                return response()->json(['payment_id' => $existing->id, 'invoice' => $this->balance($row, $paid)]);
+            }
+            abort_if($amount > (int) $row->amount_paise - $paid, 422, 'Payment exceeds the outstanding balance.');
+            $id = Str::uuid7()->toString();
+            DB::table('commercial_payments')->insert([
+                'id' => $id, 'invoice_id' => $invoice, 'amount_paise' => $amount,
+                'receipt_reference' => $data['receipt_reference'], 'recorded_at' => now(),
+            ]);
+            $this->entry($invoice, $id, 'payment', $amount);
+
+            return response()->json(['payment_id' => $id, 'invoice' => $this->balance($row, $paid + $amount)], 201);
+        }, attempts: 3);
+    }
+
+    public function reverse(Request $request, string $invoice, string $payment): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $reason = $request->validate(['reason' => 'required|string|max:500'])['reason'];
+
+        return DB::transaction(function () use ($invoice, $payment, $reason): JsonResponse {
+            $row = $this->findInvoice($invoice, true);
+            $amount = DB::table('commercial_payments')->where(['invoice_id' => $invoice, 'id' => $payment])->value('amount_paise');
+            abort_if($amount === null, 404);
+            $existing = DB::table('commercial_billing_ledger')->where(['payment_id' => $payment, 'entry_type' => 'reversal'])->first();
+            if ($existing !== null) {
+                abort_unless($existing->reason === $reason, 409);
+            } else {
+                $this->entry($invoice, $payment, 'reversal', -(int) $amount, $reason);
+            }
+
+            return response()->json($this->balance($row, $this->paid($invoice)));
+        }, attempts: 3);
+    }
+
+    private function findInvoice(string $invoice, bool $lock): object
+    {
+        $row = DB::table('commercial_invoices')->where('id', $invoice)->when($lock, fn ($query) => $query->lockForUpdate())->first();
+        abort_if($row === null, 404);
+
+        return $row;
+    }
+
+    private function paid(string $invoice): int
+    {
+        return (int) DB::table('commercial_billing_ledger')->where('invoice_id', $invoice)->sum('delta_paise');
+    }
+
+    private function balance(object $invoice, int $paid): array
+    {
+        $amount = (int) $invoice->amount_paise;
+        $status = match (true) {
+            $amount === $paid => 'Paid',
+            $invoice->due_on < now('Asia/Kolkata')->toDateString() => 'Past Due',
+            $paid > 0 => 'Partially Paid',
+            default => 'Issued/Open',
+        };
+
+        return [...(array) $invoice, 'currency' => 'INR', 'status' => $status, 'paid_paise' => $paid, 'outstanding_paise' => $amount - $paid];
+    }
+
+    private function entry(string $invoice, string $payment, string $type, int $amount, ?string $reason = null): void
+    {
+        DB::table('commercial_billing_ledger')->insert([
+            'id' => Str::uuid7()->toString(), 'invoice_id' => $invoice, 'payment_id' => $payment, 'actor_id' => Auth::id(),
+            'entry_type' => $type, 'delta_paise' => $amount, 'reason' => $reason, 'recorded_at' => now(),
+        ]);
+        $this->audit('commercial.payment_'.$type, $payment, ['invoice_id' => $invoice, 'delta_paise' => $amount, 'reason' => $reason]);
+    }
+
+    private function audit(string $action, string $subject, array $details): void
+    {
+        DB::table('portal_events')->insert([
+            'id' => Str::uuid7()->toString(), 'action' => $action, 'subject_id' => $subject,
+            'actor_id' => Auth::id(), 'recorded_at' => now(), 'details' => json_encode($details, JSON_THROW_ON_ERROR),
+        ]);
+    }
+}

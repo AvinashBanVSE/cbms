@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -34,6 +35,8 @@ final class CommercialFoundationTest extends TestCase
         $this->getJson($base.'?section=accounts')->assertUnauthorized();
         $this->actingAs(User::findOrFail($administrator));
         $this->getJson($base.'?section=accounts')->assertForbidden();
+        $this->getJson("{$base}/businesses/{$child}/effective-entitlements")->assertForbidden();
+        $this->postJson("{$base}/subscriptions/{$tenant}/transition", [])->assertForbidden();
         foreach (['commercial.manage', 'business_structure.create'] as $permission) {
             DB::table('portal_grants')->insert(['business_id' => $portal, 'user_id' => $administrator, 'permission' => $permission]);
         }
@@ -71,11 +74,109 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $future, 'state' => 'Pending Activation', 'ends_before' => '2032-03-29']);
         $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonCount(4, 'data');
         $this->assertDatabaseCount('customer_permissions', 0);
+        $this->travelTo(CarbonImmutable::parse('2032-02-28', 'Asia/Kolkata'));
+        $this->postJson("{$base}/subscriptions/{$self}/transition", [
+            'action' => 'activate', 'expected_state' => 'Pending Activation', 'reason' => 'Enable services',
+        ])->assertConflict()->assertJsonPath('message', 'Issue the term invoice before activation.');
+        $this->travelBack();
 
+        $this->assertBilling($base, $selected, $organization);
+        $this->assertSubscriptionLifecycle($base, $selected, $child, $organization, $otherChild);
         DB::table('customer_tenants')->where('id', $tenant)->update(['provider_id' => $portal]);
         $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'organization'])->assertConflict();
+        $this->travelTo(CarbonImmutable::parse('2032-03-02', 'Asia/Kolkata'));
+        $this->postJson("{$base}/subscriptions/{$self}/transition", [
+            'action' => 'activate', 'expected_state' => 'Pending Activation', 'reason' => 'Enable services',
+        ])->assertConflict()->assertJsonPath('message', 'This agreement requires a separate commercial transition.');
         $this->assertDatabaseHas('commercial_accounts', ['id' => $account, 'provider_id' => $provider]);
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $selected, 'plan_version_id' => $version]);
+    }
+
+    private function assertSubscriptionLifecycle(string $base, string $subscription, string $child, string $organization, string $otherChild): void
+    {
+        $transition = "{$base}/subscriptions/{$subscription}/transition";
+        $available = "{$base}/businesses/{$child}/effective-entitlements";
+        $activate = ['action' => 'activate', 'expected_state' => 'Pending Activation', 'reason' => 'Full term payment verified'];
+        $this->travelTo(CarbonImmutable::parse('2032-02-27 18:29:59', 'UTC'));
+        $this->postJson($transition, $activate)->assertConflict()->assertJsonPath('message', 'The Subscription term has yet to start.');
+        $this->travel(1)->seconds();
+        $this->postJson($transition, $activate)->assertConflict()->assertJsonPath('message', 'Settle the term invoice before activation.');
+        $this->postJson($transition, [...$activate, 'action' => 'suspend'])->assertConflict();
+        $this->getJson($available)->assertOk()->assertExactJson(['business_id' => $child, 'feature_codes' => []]);
+
+        $invoice = DB::table('commercial_invoices')->where('subscription_id', $subscription)->value('id');
+        $this->travelTo(CarbonImmutable::parse('2032-03-03', 'Asia/Kolkata'));
+        $payments = "{$base}/invoices/{$invoice}/payments";
+        $payment = $this->postJson($payments, ['receipt_reference' => 'REPLACEMENT', 'amount_paise' => 2000])->assertCreated()->json('payment_id');
+        $this->postJson($transition, $activate)->assertOk()->assertJsonPath('state', 'Active');
+        $this->postJson($transition, $activate)->assertConflict()->assertJsonPath('message', 'The Subscription state changed. Reload the commercial records.');
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+        $this->getJson("{$base}/businesses/{$organization}/effective-entitlements")->assertOk()->assertJsonPath('feature_codes', []);
+        DB::table('commercial_subscription_coverage')->insert(['subscription_id' => $subscription, 'business_id' => $otherChild]);
+        $this->getJson("{$base}/businesses/{$otherChild}/effective-entitlements")->assertOk()->assertJsonPath('feature_codes', []);
+        $unknown = Str::uuid7()->toString();
+        $this->getJson("{$base}/businesses/{$unknown}/effective-entitlements")->assertNotFound();
+        $this->postJson("{$base}/subscriptions/{$unknown}/transition", $activate)->assertNotFound();
+        $this->postJson($transition, [...$activate, 'reason' => ''])->assertUnprocessable();
+
+        $this->postJson("{$payments}/{$payment}/reverse", ['reason' => 'Replacement receipt reversed'])->assertOk();
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+        $suspend = ['action' => 'suspend', 'expected_state' => 'Active', 'reason' => 'Commercial review'];
+        $this->postJson($transition, $suspend)->assertOk()->assertJsonPath('state', 'Suspended');
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
+        $reinstate = [...$activate, 'expected_state' => 'Suspended'];
+        $this->postJson($transition, $reinstate)->assertConflict()->assertJsonPath('message', 'Settle the term invoice before activation.');
+        $this->postJson($payments, ['receipt_reference' => 'FINAL', 'amount_paise' => 2000])->assertCreated();
+        $this->postJson($transition, $reinstate)->assertOk()->assertJsonPath('state', 'Active');
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $subscription, 'action' => 'commercial.subscription_state_changed',
+            'details' => '{"from":"Active","to":"Suspended","reason":"Commercial review"}']);
+
+        $cancel = ['action' => 'cancel', 'expected_state' => 'Active', 'reason' => 'Agreement ended by request'];
+        $this->travelTo(CarbonImmutable::parse('2032-03-29', 'Asia/Kolkata'));
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
+        $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['effective_state' => 'Expired']);
+        $this->postJson($transition, $cancel)->assertConflict()->assertJsonPath('message', 'The Subscription term has ended.');
+        $this->travelTo(CarbonImmutable::parse('2032-03-28', 'Asia/Kolkata'));
+        $this->postJson($transition, $cancel)->assertOk()->assertJsonPath('state', 'Cancelled');
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
+        $this->assertDatabaseHas('business_identities', ['id' => $child, 'operational_state' => 'Active']);
+        $this->assertDatabaseCount('customer_permissions', 0);
+        $this->travelBack();
+    }
+
+    private function assertBilling(string $base, string $subscription, string $organization): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2032-02-28 21:00:00', 'UTC'));
+        $terms = ['subscription_id' => $subscription, 'due_on' => '2032-02-29'];
+        $this->postJson($base.'/invoices', [...$terms, 'due_on' => '2032-02-28'])->assertUnprocessable();
+        $bill = $this->postJson($base.'/invoices', $terms)->assertCreated()
+            ->assertJsonPath('issued_on', '2032-02-29')->assertJsonPath('amount_paise', 12345)
+            ->assertJsonPath('status', 'Issued/Open')->json('id');
+        $this->postJson($base.'/invoices', $terms)->assertOk()->assertJsonPath('id', $bill);
+        $payments = "{$base}/invoices/{$bill}/payments";
+        $first = ['receipt_reference' => 'TEST-RECEIPT-1', 'amount_paise' => 2000];
+        $payment = $this->postJson($payments, $first)->assertCreated()
+            ->assertJsonPath('invoice.status', 'Partially Paid')->assertJsonPath('invoice.outstanding_paise', 10345)->json('payment_id');
+        $this->postJson($payments, $first)->assertOk()->assertJsonPath('payment_id', $payment);
+        $this->postJson($payments, [...$first, 'amount_paise' => 3000])->assertConflict();
+        $this->postJson($payments, ['receipt_reference' => 'TEST-OVERPAY', 'amount_paise' => 10346])->assertUnprocessable();
+        $this->postJson($payments, ['receipt_reference' => 'TEST-RECEIPT-2', 'amount_paise' => 10345])->assertCreated()
+            ->assertJsonPath('invoice.status', 'Paid');
+        $this->getJson($base.'/invoices')->assertOk()->assertJsonPath('data.0.status', 'Paid');
+
+        $this->travel(1)->days();
+        $reversal = ['reason' => 'Receipt corrected'];
+        $this->postJson("{$payments}/{$payment}/reverse", $reversal)->assertOk()->assertJsonPath('status', 'Past Due')
+            ->assertJsonPath('outstanding_paise', 2000);
+        $this->postJson("{$payments}/{$payment}/reverse", $reversal)->assertOk();
+        $this->postJson("{$payments}/{$payment}/reverse", ['reason' => 'Different reason'])->assertConflict();
+        $this->postJson($base.'/invoices', $terms)->assertOk()->assertJsonPath('id', $bill);
+        $this->getJson($payments)->assertOk()->assertJsonCount(3, 'history.data');
+        $this->assertDatabaseHas('commercial_payments', ['id' => $payment, 'amount_paise' => 2000]);
+        $this->assertDatabaseHas('commercial_billing_ledger', ['payment_id' => $payment, 'entry_type' => 'reversal', 'delta_paise' => -2000]);
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $subscription, 'state' => 'Pending Activation']);
+        $this->assertDatabaseHas('business_identities', ['id' => $organization, 'operational_state' => 'Active']);
+        $this->travelBack();
     }
 
     private function business(string $kind, ?string $parent = null): string

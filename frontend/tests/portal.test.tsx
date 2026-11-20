@@ -911,3 +911,169 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
     document.querySelector('[aria-label="Commercial records"]')?.textContent,
   ).toContain("saved");
 });
+
+it("changes a subscription state and resolves features for a covered business", async () => {
+  let state = "Pending Activation";
+  let settled = false;
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    if (path === "commercial?section=subscriptions&page=1")
+      return json({
+        data: [
+          { id: "contract", state, effective_state: state },
+          { id: "ended", state: "Active", effective_state: "Expired" },
+        ],
+        next_page_url: null,
+      });
+    if (path === "commercial/subscriptions/contract/transition") {
+      expect(body?.expected_state).toBe(state);
+      if (!settled)
+        throw new Error("Settle the term invoice before activation.");
+      state = body?.action === "activate" ? "Active" : "Suspended";
+      return json({ id: "contract", state });
+    }
+    if (path === "commercial/businesses/shop/effective-entitlements")
+      return json({
+        business_id: "shop",
+        feature_codes: state === "Active" ? ["portal.reports"] : [],
+      });
+    throw new Error(path);
+  });
+  await render();
+  await click("Commercial");
+  const select = document.querySelector<HTMLSelectElement>(
+    "section > label select",
+  )!;
+  await act(async () => {
+    select.value = "subscriptions";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await click("Load commercial records");
+  const transition = "form[data-operation=subscription-transition]";
+  const lookup = "form[data-operation=effective-entitlements]";
+  expect(document.querySelectorAll(transition)).toHaveLength(1);
+  const apply = async (action: string, reason: string) => {
+    input("action", action);
+    input("reason", reason);
+    await submit(transition);
+  };
+  await apply("activate", "Receipt checked");
+  expect(document.body.textContent).toContain(
+    "Settle the term invoice before activation.",
+  );
+  settled = true;
+  await apply("activate", "Receipt checked");
+  expect(request).toHaveBeenCalledWith(
+    "commercial/subscriptions/contract/transition",
+    {
+      action: "activate",
+      expected_state: "Pending Activation",
+      reason: "Receipt checked",
+    },
+  );
+  expect(document.body.textContent).toContain("Subscription state updated.");
+  input("business_id", "shop");
+  await submit(lookup);
+  expect(
+    document.querySelector('[aria-label="Available features"]')?.textContent,
+  ).toContain("portal.reports");
+  await apply("suspend", "Commercial review");
+  expect(
+    document.querySelector('[aria-label="Available features"]'),
+  ).toBeNull();
+  await submit(lookup);
+  expect(document.body.textContent).toContain(
+    "No features are currently available.",
+  );
+  expect(document.querySelector(transition)?.textContent).toContain(
+    "Reinstate",
+  );
+});
+
+it("issues a billing record and records payments and reversals", async () => {
+  let paid = 0;
+  let results = 0;
+  const invoice = () => ({
+    id: "invoice1",
+    status: paid ? "Partially Paid" : "Issued/Open",
+    paid_paise: paid,
+    outstanding_paise: 12345 - paid,
+  });
+  request.mockImplementation(async (url, body) => {
+    if (url === "installation") return json({ stage: "ready" });
+    if (url === "services/categories") return json({ A1: "Identity" });
+    if (url === "services?page=1") return json({ data: [] });
+    if (url === "commercial/invoices" && body) return json(invoice());
+    if (url.startsWith("commercial/invoices?page="))
+      return json({
+        data: [invoice()],
+        next_page_url: url.endsWith("1") ? "next" : null,
+      });
+    if (url.startsWith("commercial/invoices/invoice1/payments?page="))
+      return json({
+        invoice: invoice(),
+        history: {
+          data: results
+            ? [
+                {
+                  id: "entry",
+                  payment_id: "payment1",
+                  entry_type: "payment",
+                  receipt_reference: "R-01",
+                  delta_paise: 2000,
+                },
+              ]
+            : [],
+          next_page_url: url.endsWith("1") ? "next" : null,
+        },
+      });
+    if (url === "commercial/invoices/invoice1/payments") {
+      expect(body).toEqual({ amount_paise: "2000", receipt_reference: "R-01" });
+      paid = 2000;
+      results++;
+      return json({ id: "payment1" });
+    }
+    if (url === "commercial/invoices/invoice1/payments/payment1/reverse") {
+      expect(body).toEqual({ reason: "Correction" });
+      paid = 0;
+      results++;
+      return json(invoice());
+    }
+    throw new Error("Billing operation unavailable");
+  });
+  await render();
+  await click("Commercial");
+  const issue = "form[data-operation=billing-issue]";
+  const payment = "form[data-operation=billing-payment]";
+  const reverse = "form[data-operation=billing-reverse]";
+  const set = (form: string, name: string, value: string) => {
+    document.querySelector<HTMLInputElement>(
+      form + ' input[name="' + name + '"]',
+    )!.value = value;
+  };
+  set(issue, "subscription_id", "subscription");
+  set(issue, "due_on", "2032-02-29");
+  await submit(issue);
+  expect(document.body.textContent).toContain("Billing record saved");
+  await click("Load billing records");
+  await click("Next invoices");
+  await click("Previous invoices");
+  await click("View invoice invoice1");
+  await click("Next ledger entries");
+  await click("Previous ledger entries");
+  set(payment, "amount_paise", "2000");
+  set(payment, "receipt_reference", "R-01");
+  await submit(payment);
+  expect(document.body.textContent).toContain("Partially Paid");
+  set(reverse, "payment", "payment1");
+  set(reverse, "reason", "Correction");
+  await submit(reverse);
+  expect(document.body.textContent).toContain("Payment reversal recorded");
+  set(reverse, "payment", "missing");
+  set(reverse, "reason", "Correction");
+  await submit(reverse);
+  expect(document.body.textContent).toContain("Billing operation unavailable");
+  expect(results).toBe(2);
+});
