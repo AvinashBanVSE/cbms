@@ -6,6 +6,8 @@ import "./portal.css";
 import { type ActiveAccessDelegation } from "./OrganizationDelegations";
 import { OrganizationAccess, OrganizationUsers } from "./OrganizationUsers";
 import { OrganizationAccountSetup } from "./OrganizationAccountSetup";
+import { ProviderAccounts } from "./ProviderAccounts";
+import { ProviderDirectory } from "./ProviderDirectory";
 import { BusinessDirectory } from "./BusinessDirectory";
 import { MappingWorkspace, type MappingContext } from "./MappingWorkspace";
 import { ServiceRegistry } from "./registry";
@@ -42,6 +44,7 @@ const administration = {
   users: ["Organization users", "Organization users"],
   commercial: ["Commercial", "Commercial management"],
   audit: ["Audit Trail", "Audit Trail"],
+  provider_users: ["Sub-Portal users", "Sub-Portal user administration"],
 } as const;
 type AdministrationSection = keyof typeof administration;
 
@@ -50,6 +53,7 @@ interface WorkspaceAccess {
   mapping_contexts: MappingContext[];
   delegations: ActiveAccessDelegation[];
   organization_onboarding?: { tenant_id: string; professional_name: string };
+  provider_directory?: { id: string; professional_name: string };
 }
 
 const appearanceOptions = {
@@ -243,6 +247,15 @@ export function Portal() {
             {mappingContexts.length > 0 && (
               <MappingWorkspace contexts={mappingContexts} />
             )}
+            {workspace.provider_directory && (
+              <section aria-label="Sub-Portal workspace">
+                <h2>
+                  {workspace.provider_directory.professional_name} · Served
+                  Organizations
+                </h2>
+                <ProviderDirectory />
+              </section>
+            )}
             {workspace.organization_onboarding && (
               <section aria-label="Organization onboarding">
                 <h2>
@@ -275,6 +288,8 @@ export function Portal() {
                     <CommercialWorkspace />
                   ) : section === "audit" ? (
                     <AuditTrail />
+                  ) : section === "provider_users" ? (
+                    <ProviderAccounts />
                   ) : section === "users" ? (
                     <OrganizationUsers />
                   ) : section === "businesses" ? (
@@ -288,7 +303,8 @@ export function Portal() {
             {!section &&
               !mappingContexts.length &&
               !delegations.length &&
-              !workspace.organization_onboarding && (
+              !workspace.organization_onboarding &&
+              !workspace.provider_directory && (
                 <p>No workspace is assigned to this account.</p>
               )}
             <button

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
+use App\Authorization\ProviderAccess;
 use App\Http\Controllers\AuditTrailController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\OrganizationCredentialController;
 use App\Http\Controllers\OrganizationDelegationController;
 use App\Http\Controllers\OrganizationRoleController;
 use App\Http\Controllers\OrganizationUserController;
+use App\Http\Controllers\ProviderUserController;
 use App\Http\Controllers\RoleApprovalController;
 use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
@@ -25,12 +27,16 @@ use App\Http\Controllers\WorkspaceAccessController;
 use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
     Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::get('provider-organizations', [ProviderUserController::class, 'organizations']);
+    Route::post('providers/{provider}/users', [ProviderUserController::class, 'store'])->whereUuid('provider');
+    Route::post('providers/{provider}/users/reissue', [ProviderUserController::class, 'reissue'])->whereUuid('provider')
+        ->middleware('throttle:5,1,provider-setup-reissue');
+    Route::post('providers/{provider}/users/revoke', [ProviderUserController::class, 'revoke'])->whereUuid('provider');
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
@@ -39,7 +45,7 @@ Route::prefix('api/v1')->group(function (): void {
             $credentials = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email', 'password' => 'required|string']);
             $version = null;
             abort_unless(Auth::attemptWhen($credentials, static function ($user) use (&$version): bool {
-                $account = DB::table('customer_accounts')->where('user_id', $user->getAuthIdentifier())->first(['state', 'session_version']);
+                $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
                 $version = $account === null ? null : (int) $account->session_version;
 
                 return $account === null || $account->state === 'Active';

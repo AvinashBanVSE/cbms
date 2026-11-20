@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Accounts\SetupDelivery;
+use App\Accounts\UserCode;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\MappingPermissions;
 use App\Authorization\OrganizationOnboardingAccess;
@@ -13,11 +15,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 final class OrganizationUserController
 {
@@ -81,8 +81,7 @@ final class OrganizationUserController
         ]);
         $id = Str::uuid7()->toString();
         $code = DB::transaction(function () use ($id, $input, $tenant): string {
-            // Serializes allocation against other registrations, including a concurrent retry.
-            DB::table('portal_installation')->where('id', 1)->lockForUpdate()->first();
+            $code = UserCode::allocate();
             $mainPortal = $this->onboarding->requireFor($tenant, lock: true);
             $organization = DB::table('customer_tenants')->where('id', $tenant)->lockForUpdate()->value('organization_id');
             abort_if($organization === null, 404);
@@ -100,19 +99,12 @@ final class OrganizationUserController
             }
             $mode = $this->policy->resolve($tenant)['mode'];
             abort_if($mode === null, 409, 'Configure an applicable credential setup policy first.');
-            $this->requireDeliverableMailer();
+            SetupDelivery::requireMailer();
             $email = Str::lower($input['email']);
             if (DB::table('users')->join('customer_accounts', 'users.id', '=', 'customer_accounts.user_id')
                 ->where('tenant_id', $tenant)->whereRaw('LOWER(email) = ?', [$email])->exists()) {
                 throw ValidationException::withMessages(['email' => 'This email is unavailable.']);
             }
-            for ($attempt = 0; $attempt < 50; $attempt++) {
-                $code = chr(random_int(65, 90)).chr(random_int(65, 90)).sprintf('%04d', random_int(0, 9999));
-                if (! DB::table('users')->where('code', $code)->exists()) {
-                    break;
-                }
-            }
-            abort_if($attempt === 50, 503);
             DB::table('users')->insert(['id' => $id, 'code' => $code, 'email' => $email, 'password' => Hash::make(Str::random(64))]);
             DB::table('customer_accounts')->insert(['user_id' => $id, 'tenant_id' => $tenant, 'state' => 'Pending Verification']);
             DB::table('organization_user_setups')->insert(['user_id' => $id, 'mode' => $mode]);
@@ -135,7 +127,7 @@ final class OrganizationUserController
     {
         $this->onboarding->requireFor($tenant);
         $input = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
-        $this->requireDeliverableMailer();
+        SetupDelivery::requireMailer();
         $sent = $this->issue($tenant, $input['code']);
 
         return response()->json(['delivery' => $sent ? 'sent' : 'failed']);
@@ -161,12 +153,6 @@ final class OrganizationUserController
         }, attempts: 3);
 
         return response()->json(['status' => 'revoked']);
-    }
-
-    private function requireDeliverableMailer(): void
-    {
-        $transport = config('mail.mailers.'.config('mail.default').'.transport');
-        abort_if(! is_string($transport) || in_array($transport, ['log', 'array', 'failover', 'roundrobin'], true), 503);
     }
 
     private function issue(string $tenant, string $code): bool
@@ -202,19 +188,8 @@ final class OrganizationUserController
             return [$account->email, $temporary, $otp];
         });
         [$email, $temporary, $otp] = $credentials;
-        $body = ["Your CBM User Code is {$code}. Open the CBM Portal and select Set up account."];
-        if ($temporary !== null) {
-            $body[] = "Temporary password: {$temporary}";
-        }
-        if ($otp !== null) {
-            $body[] = "One-time code: {$otp}";
-        }
 
-        try {
-            return Mail::raw(implode("\n", $body), fn ($message) => $message->to($email)->subject('CBM account setup')) !== null;
-        } catch (TransportExceptionInterface) {
-            return false;
-        }
+        return SetupDelivery::send($email, $code, $temporary, $otp);
     }
 
     private function record(string $subject, string $action): void

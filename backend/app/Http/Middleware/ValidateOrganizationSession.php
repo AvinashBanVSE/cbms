@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Authorization\ProviderAccess;
 use Closure;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 final class ValidateOrganizationSession
@@ -22,7 +22,7 @@ final class ValidateOrganizationSession
         $session = $request->session();
         $user = $session->get($guard->getName());
         if ($user !== null) {
-            $account = DB::table('customer_accounts')->where('user_id', $user)->first(['state', 'session_version']);
+            $account = ProviderAccess::sessionAccount((string) $user);
             if ($account !== null && ($account->state !== 'Active' || (int) $account->session_version !== $session->get(self::VERSION))) {
                 $guard->logout();
                 $session->invalidate();

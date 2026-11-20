@@ -19,6 +19,7 @@ final class PermissionCatalogue
         'organization_users.manage' => 'users',
         'commercial.manage' => 'commercial',
         'organization_roles.approval_policy' => null,
+        'provider_users.manage' => 'provider_users',
         'audit_trail.view' => 'audit',
     ];
 

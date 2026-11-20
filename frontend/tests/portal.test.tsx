@@ -251,6 +251,93 @@ it("opens only the assigned workspace without service catalogue access", async (
   expect(document.querySelector("h1")?.textContent).toBe("Sign in");
 });
 
+it("opens only the assigned Sub-Portal directory and paginates its Organizations", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({
+        ...adminWorkspace,
+        administration: [],
+        provider_directory: { id: "provider", professional_name: "Provider A" },
+      });
+    if (path === "provider-organizations?page=1")
+      return json({
+        data: [
+          {
+            id: "org",
+            professional_name: "Served",
+            operational_state: "Active",
+            tenant_id: "tenant",
+          },
+        ],
+        next_page_url: "/next",
+      });
+    if (path === "provider-organizations?page=2")
+      return json({ data: [], next_page_url: null });
+    throw new Error(path);
+  });
+  await render();
+  expect(
+    document.querySelector('[aria-label="Sub-Portal workspace"]')?.textContent,
+  ).toContain("Provider A");
+  expect(
+    document.querySelector('[aria-label="Served Organizations"]')?.textContent,
+  ).toContain("Served");
+  expect(document.querySelector("nav")).toBeNull();
+  await click("Next Organizations");
+  expect(document.body.textContent).toContain("No Organizations on this page.");
+  await click("Previous Organizations");
+  expect(request).not.toHaveBeenCalledWith("services/categories");
+});
+
+it("provisions, reissues and terminates Sub-Portal user accounts", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["provider_users"] });
+    if (path === "providers/provider/users") {
+      expect(body).toEqual({
+        email: "staff@example.test",
+        permission: "provider.organizations.view",
+      });
+      return json({ user_code: "AA6190", delivery: "sent" });
+    }
+    if (path === "providers/provider/users/reissue") {
+      expect(body).toEqual({ code: "AA6190" });
+      return json({ delivery: "failed" });
+    }
+    if (path === "providers/provider/users/revoke") {
+      expect(body).toEqual({ code: "AA6190", reason: "Access withdrawn" });
+      return json({ state: "Terminated" });
+    }
+    throw new Error(path);
+  });
+  await render();
+  const providerForm = (operation: string) =>
+    'form[data-operation="provider-' + operation + '"]';
+  const fill = (operation: string, field: string, value: string) => {
+    document.querySelector<HTMLInputElement>(
+      providerForm(operation) + ' input[name="' + field + '"]',
+    )!.value = value;
+  };
+  fill("create", "provider", "provider");
+  fill("create", "email", "staff@example.test");
+  document.querySelector<HTMLInputElement>(
+    providerForm("create") + ' input[name="permission"]',
+  )!.checked = true;
+  await submit(providerForm("create"));
+  expect(document.body.textContent).toContain("AA6190");
+  fill("reissue", "provider", "provider");
+  fill("reissue", "code", "AA6190");
+  await submit(providerForm("reissue"));
+  expect(document.body.textContent).toContain("Email failed.");
+  fill("revoke", "provider", "provider");
+  fill("revoke", "code", "AA6190");
+  fill("revoke", "reason", "Access withdrawn");
+  await submit(providerForm("revoke"));
+  expect(document.body.textContent).toContain("Sub-Portal account terminated.");
+});
+
 it("binds Organization onboarding to the authenticated tenant", async () => {
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
