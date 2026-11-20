@@ -29,8 +29,6 @@ final class CustomerBusinessAccess
         abort_if($user === null, 401);
 
         return $this->activeAssignments((string) $user)
-            ->whereIn('entity.kind', ['Shop', 'Distributor'])
-            ->whereIn('permission.action', MappingPermissions::actions())
             ->select('entity.id', 'entity.kind', 'entity.professional_name', 'permission.action')
             ->orderBy('entity.id')->orderBy('permission.action')->get()->all();
     }
@@ -53,6 +51,11 @@ final class CustomerBusinessAccess
                 'entity.id',
             )
             ->whereColumn('entity.parent_id', 'tenant.organization_id')
+            ->where(function (Builder $eligible): void {
+                foreach (PermissionCatalogue::MAPPING_BY_BUSINESS as $kind => $actions) {
+                    $eligible->orWhere(fn (Builder $business) => $business->where('entity.kind', $kind)->whereIn('permission.action', $actions));
+                }
+            })
             ->where('account.user_id', $user)
             ->where('account.state', 'Active')
             ->where('association.active', true);

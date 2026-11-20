@@ -27,6 +27,7 @@ final class MainPortalAccess
         return DB::table('portal_grants')
             ->join('portal_installation as installation', 'installation.portal_id', '=', 'portal_grants.business_id')
             ->where('installation.id', 1)->where('installation.stage', 'ready')->where('portal_grants.user_id', $user)
+            ->whereIn('portal_grants.permission', array_keys(PermissionCatalogue::MAIN_PORTAL))
             ->whereNotExists(fn (Builder $accounts) => $accounts->selectRaw('1')->from('customer_accounts')->where('user_id', $user));
     }
 }

@@ -25,6 +25,8 @@ final class BusinessMappingTest extends TestCase
         $this->actingAs($shopUser);
         $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('administration', [])
             ->assertJsonCount(3, 'mapping_contexts')->assertJsonMissing(['id' => $distributor]);
+        DB::table('customer_permissions')->insert(['user_id' => $shopUser->id, 'business_id' => $shop, 'action' => 'mapping.verify']);
+        $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(3)->assertJsonMissing(['action' => 'mapping.verify']);
         $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(3)
             ->assertJsonPath('0.id', $shop)->assertJsonMissing(['id' => $distributor]);
         DB::table('customer_business_scopes')->where('user_id', $shopUser->id)->delete();
