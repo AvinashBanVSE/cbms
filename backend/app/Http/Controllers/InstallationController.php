@@ -51,7 +51,7 @@ final class InstallationController
             DB::table('ownership_holders')->insert(['id' => $owner, 'name' => $data['name']]);
             DB::table('ownership_links')->insert(['id' => (string) Str::uuid7(), 'owner_id' => $owner, 'business_id' => $portal]);
             DB::table('users')->insert(['id' => $user, 'email' => $data['email'], 'code' => $code, 'password' => $password]);
-            foreach (['service_catalogue.view', 'service_catalogue.create', 'business_structure.view', 'business_structure.create', 'organization_users.manage'] as $permission) {
+            foreach (['service_catalogue.view', 'service_catalogue.create', 'business_structure.view', 'business_structure.create', 'business_structure.lifecycle', 'service_provider.migrate', 'commercial.manage', 'organization_users.manage', 'organization_roles.approval_policy'] as $permission) {
                 DB::table('portal_grants')->insert(['user_id' => $user, 'business_id' => $portal, 'permission' => $permission]);
             }
             $this->record('installation.owner_created', $user);

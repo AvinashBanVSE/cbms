@@ -42,6 +42,15 @@ final class ServiceRegistryController
         return $this->create('platform_services', $data, 'service.created');
     }
 
+    public function capabilities(string $service): JsonResponse
+    {
+        $this->access->requirePermission('service_catalogue.view');
+        abort_unless(DB::table('platform_services')->where('id', $service)->exists(), 404);
+
+        return response()->json(DB::table('service_capabilities')->where('service_id', $service)
+            ->orderBy('name')->orderBy('id')->simplePaginate(30))->header('Cache-Control', 'no-store');
+    }
+
     public function createCapability(Request $request, string $service): JsonResponse
     {
         $this->access->requirePermission('service_catalogue.create');

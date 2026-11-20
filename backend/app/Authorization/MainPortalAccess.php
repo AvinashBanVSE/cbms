@@ -13,9 +13,17 @@ final class MainPortalAccess
     {
         abort_unless(Auth::check(), 401);
 
-        abort_if(DB::table('customer_accounts')->where('user_id', Auth::id())->exists(), 403);
+        abort_unless($this->allows((string) Auth::id(), $permission), 403);
+    }
+
+    public function allows(string $user, string $permission): bool
+    {
+        if (DB::table('customer_accounts')->where('user_id', $user)->exists()) {
+            return false;
+        }
         $portal = DB::table('portal_installation')->where('id', 1)->where('stage', 'ready')->value('portal_id');
-        abort_unless($portal !== null && DB::table('portal_grants')->where('user_id', Auth::id())
-            ->where('business_id', $portal)->where('permission', $permission)->exists(), 403);
+
+        return $portal !== null && DB::table('portal_grants')->where('user_id', $user)
+            ->where('business_id', $portal)->where('permission', $permission)->exists();
     }
 }

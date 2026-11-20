@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { CommercialWorkspace } from "./CommercialWorkspace";
 import { portalRequest, PortalRequestError } from "./api";
 import "./portal.css";
-import { OrganizationUsers } from "./OrganizationUsers";
+import { type ActiveAccessDelegation } from "./OrganizationDelegations";
+import { OrganizationAccess, OrganizationUsers } from "./OrganizationUsers";
 import { OrganizationAccountSetup } from "./OrganizationAccountSetup";
 import { BusinessDirectory } from "./BusinessDirectory";
 import { MappingWorkspace, type MappingContext } from "./MappingWorkspace";
@@ -34,6 +36,7 @@ const titles = {
 };
 
 export function Portal() {
+  const [delegations, setDelegations] = useState<ActiveAccessDelegation[]>([]);
   const [mappingContexts, setMappingContexts] = useState<MappingContext[]>([]);
   const [section, setSection] = useState("services");
   const [setupAccount, setSetupAccount] = useState(false);
@@ -53,8 +56,12 @@ export function Portal() {
       const contexts: MappingContext[] = await (
         await portalRequest("mapping-contexts")
       ).json();
-      if (!contexts.length) throw error;
+      const active: ActiveAccessDelegation[] = await (
+        await portalRequest("organization-access-delegations")
+      ).json();
+      if (!contexts.length && !active.length) throw error;
       setMappingContexts(contexts);
+      setDelegations(active);
     }
   }
   useEffect(() => {
@@ -130,21 +137,39 @@ export function Portal() {
         <h1>
           {mappingContexts.length
             ? "Distributor–Shop mappings"
-            : categories
-              ? section === "businesses"
-                ? "Business structure"
-                : section === "users"
-                  ? "Organization users"
-                  : "Service catalogue"
-              : stage
-                ? setupAccount
-                  ? "Set up account"
-                  : titles[stage]
-                : "Portal setup"}
+            : delegations.length
+              ? "Delegated business access"
+              : categories
+                ? section === "businesses"
+                  ? "Business structure"
+                  : section === "users"
+                    ? "Organization users"
+                    : section === "commercial"
+                      ? "Commercial management"
+                      : "Service catalogue"
+                : stage
+                  ? setupAccount
+                    ? "Set up account"
+                    : titles[stage]
+                  : "Portal setup"}
         </h1>
         <p role="status">{notice}</p>
-        {categories || mappingContexts.length ? (
+        {categories || mappingContexts.length || delegations.length ? (
           <>
+            {delegations.length > 0 && (
+              <section aria-label="Active delegations">
+                <h2>Active delegations</h2>
+                <ul>
+                  {delegations.map((grant) => (
+                    <li key={grant.id}>
+                      {grant.professional_name} · Tenant {grant.tenant_id} ·
+                      Business {grant.business_id}
+                    </li>
+                  ))}
+                </ul>
+                <OrganizationAccess />
+              </section>
+            )}
             {mappingContexts.length ? (
               <MappingWorkspace contexts={mappingContexts} />
             ) : (
@@ -169,8 +194,16 @@ export function Portal() {
                     >
                       Organization users
                     </button>
+                    <button
+                      aria-pressed={section === "commercial"}
+                      onClick={() => setSection("commercial")}
+                    >
+                      Commercial
+                    </button>
                   </nav>
-                  {section === "users" ? (
+                  {section === "commercial" ? (
+                    <CommercialWorkspace />
+                  ) : section === "users" ? (
                     <OrganizationUsers />
                   ) : section === "businesses" ? (
                     <BusinessDirectory />
@@ -186,6 +219,7 @@ export function Portal() {
                   await portalRequest("logout", {});
                   setCategories(undefined);
                   setMappingContexts([]);
+                  setDelegations([]);
                   setSection("services");
                   setNotice("");
                 } catch (e) {

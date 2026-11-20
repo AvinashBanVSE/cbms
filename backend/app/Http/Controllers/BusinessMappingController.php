@@ -22,6 +22,7 @@ final class BusinessMappingController
         abort_unless(DB::table('business_identities')->where('id', $input['distributor_id'])->where('kind', 'Distributor')->exists(), 422);
 
         return DB::transaction(function () use ($shop, $actor, $input): JsonResponse {
+            $this->requireActiveEndpoints($shop, $input['distributor_id']);
             $id = Str::uuid7()->toString();
             $secret = bin2hex(random_bytes(16));
             DB::table('distributor_shop_mappings')->insert([
@@ -76,7 +77,10 @@ final class BusinessMappingController
             $endpoint = $kind === 'Shop' ? 'shop_id' : 'distributor_id';
             $issuer = $kind === 'Shop' ? 'pending_distributor' : 'pending_shop';
             $changed = DB::table('distributor_shop_mappings')->where('id', $mapping)->where($endpoint, $business)
-                ->whereIn('state', [$issuer, 'Active'])->update(['state' => 'Terminated', 'code_digest' => null, 'expires_at' => null]);
+                ->whereIn('state', [$issuer, 'Active', 'Suspended', 'Deactivated'])->update([
+                    'state' => 'Terminated', 'code_digest' => null, 'expires_at' => null,
+                    'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1'),
+                ]);
             abort_unless($changed === 1, 409);
             $this->record($mapping, $actor, 'terminated');
 
@@ -86,12 +90,23 @@ final class BusinessMappingController
 
     private function consume(string $id, string $shop, string $distributor, string $state, string $code, array $next): void
     {
+        $this->requireActiveEndpoints($shop, $distributor);
         $query = DB::table('distributor_shop_mappings')->where([
             'id' => $id, 'shop_id' => $shop, 'distributor_id' => $distributor, 'state' => $state,
         ])->where('expires_at', '>', now());
         $digest = $query->value('code_digest');
         abort_unless(is_string($digest) && hash_equals($digest, hash('sha256', $code)), 422, 'Mapping code is unavailable or invalid.');
-        abort_unless($query->where('code_digest', $digest)->update($next) === 1, 422, 'Mapping code is unavailable or invalid.');
+        abort_unless($query->where('code_digest', $digest)->update([...$next, 'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1')]) === 1, 422, 'Mapping code is unavailable or invalid.');
+    }
+
+    private function requireActiveEndpoints(string $shop, string $distributor): void
+    {
+        $endpoints = DB::table('business_identities')->whereIn('id', [$shop, $distributor])->orderBy('id')->lockForUpdate()->get();
+        abort_unless($endpoints->count() === 2, 422);
+        foreach ($endpoints as $endpoint) {
+            abort_unless($endpoint->operational_state === 'Active'
+                && DB::table('business_identities')->where('id', $endpoint->parent_id)->value('operational_state') === 'Active', 409, 'Both businesses must be active.');
+        }
     }
 
     private function codeFields(string $code): array

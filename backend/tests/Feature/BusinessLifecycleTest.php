@@ -1,0 +1,99 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+final class BusinessLifecycleTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_cascade_restores_only_the_exact_changed_businesses_and_eligible_mappings(): void
+    {
+        $organization = $this->business('Organization');
+        $other = $this->business('Organization');
+        $shop = $this->business('Shop', $organization);
+        $priorSuspended = $this->business('Shop', $organization, 'Suspended');
+        $distributor = $this->business('Distributor', $other);
+        $mapping = Str::uuid7()->toString();
+        DB::table('distributor_shop_mappings')->insert(['id' => $mapping, 'shop_id' => $shop, 'distributor_id' => $distributor, 'state' => 'Active']);
+        $path = "/api/v1/businesses/{$organization}/lifecycle";
+        $this->getJson($path)->assertUnauthorized();
+        $this->authenticate();
+        $this->getJson($path)->assertOk()->assertJsonPath('state', 'Active');
+        $this->postJson($path, $this->command('Closed', 0))->assertConflict();
+        $suspend = $this->command('Suspended', 0);
+        $result = $this->postJson($path, $suspend)->assertOk()->assertJsonPath('changed_businesses', 2)->assertJsonPath('changed_mappings', 1)->json();
+        $this->postJson($path, $suspend)->assertExactJson($result);
+        $this->postJson($path, [...$suspend, 'state' => 'Active'])->assertConflict();
+        $this->assertDatabaseCount('business_lifecycle_operations', 1);
+        $this->assertDatabaseHas('business_identities', ['id' => $distributor, 'operational_state' => 'Active']);
+        $snapshot = json_decode(DB::table('business_lifecycle_operations')->value('snapshot'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('Suspended', $snapshot['entities'][$priorSuspended]['before']);
+        $this->assertNull($snapshot['entities'][$priorSuspended]['after']);
+        $this->assertSame('Active', $snapshot['mappings'][$mapping]['before']);
+
+        $this->postJson($path, $this->command('Active', 1))->assertOk()->assertJsonPath('restores_operation_id', $suspend['operation_id']);
+        $this->assertDatabaseHas('business_identities', ['id' => $shop, 'operational_state' => 'Active']);
+        $this->assertDatabaseHas('business_identities', ['id' => $priorSuspended, 'operational_state' => 'Suspended']);
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $mapping, 'state' => 'Active']);
+
+        $this->postJson($path, $this->command('Deactivated', 2))->assertOk()->assertJsonPath('changed_businesses', 3);
+        $this->postJson("/api/v1/businesses/{$distributor}/lifecycle", $this->command('Suspended', 0))->assertOk();
+        $this->postJson($path, $this->command('Active', 3))->assertOk()->assertJsonPath('changed_mappings', 0);
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $mapping, 'state' => 'Deactivated']);
+        $this->assertDatabaseHas('business_identities', ['id' => $priorSuspended, 'operational_state' => 'Suspended']);
+        $this->assertDatabaseHas('portal_events', ['action' => 'business.lifecycle_changed', 'subject_id' => $organization]);
+        $this->assertDatabaseHas('business_lifecycle_history', ['business_id' => $shop, 'operation_id' => $suspend['operation_id'], 'to_state' => 'Suspended']);
+    }
+
+    public function test_children_cannot_activate_under_an_inactive_organization_and_closure_is_terminal(): void
+    {
+        $organization = $this->business('Organization', state: 'Draft');
+        $shop = $this->business('Shop', $organization, 'Draft');
+        $this->authenticate();
+        $child = "/api/v1/businesses/{$shop}/lifecycle";
+        $parent = "/api/v1/businesses/{$organization}/lifecycle";
+        $this->postJson($child, $this->command('Active', 0))->assertConflict();
+        $this->postJson($parent, $this->command('Active', 0))->assertOk();
+        $this->postJson($child, $this->command('Pending Verification', 0))->assertOk();
+        $this->postJson($child, $this->command('Active', 1))->assertUnprocessable();
+        $this->postJson($child, [...$this->command('Active', 1), 'verification_confirmed' => true])->assertOk();
+        $this->postJson($child, $this->command('Closed', 2))->assertOk();
+        $this->postJson($parent, $this->command('Closed', 1))->assertOk();
+        $this->postJson($child, $this->command('Active', 3))->assertConflict();
+        $this->postJson($parent, $this->command('Active', 2))->assertConflict();
+        $this->getJson($parent)->assertJsonPath('allowed_transitions', []);
+    }
+
+    private function authenticate(): void
+    {
+        $portal = $this->business('Main Portal');
+        $id = Str::uuid7()->toString();
+        DB::table('portal_installation')->where('id', 1)->update(['portal_id' => $portal, 'stage' => 'ready']);
+        DB::table('users')->insert(['id' => $id, 'code' => 'AA1932', 'email' => 'administrator@example.test', 'password' => 'unused']);
+        DB::table('portal_grants')->insert(['business_id' => $portal, 'user_id' => $id, 'permission' => 'business_structure.lifecycle']);
+        $this->actingAs(User::findOrFail($id));
+    }
+
+    private function command(string $state, int $version): array
+    {
+        return ['state' => $state, 'expected_version' => $version, 'operation_id' => Str::uuid7()->toString(), 'reason' => 'Authorized lifecycle change'];
+    }
+
+    private function business(string $kind, ?string $parent = null, string $state = 'Active'): string
+    {
+        $id = Str::uuid7()->toString();
+        DB::table('business_identities')->insert([
+            'id' => $id, 'kind' => $kind, 'parent_id' => $parent, 'professional_name' => $kind, 'operational_state' => $state,
+        ]);
+
+        return $id;
+    }
+}

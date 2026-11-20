@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { BusinessLifecycle } from "./BusinessLifecycle";
+import { ProviderMigration } from "./ProviderMigration";
 import { portalRequest } from "./api";
 
 interface Business {
@@ -6,6 +8,7 @@ interface Business {
   kind: string;
   professional_name: string;
   legal_name: string | null;
+  operational_state?: string;
   parent_id: string | null;
   provider_id: string | null;
   tenant_id: string | null;
@@ -26,7 +29,6 @@ export function BusinessDirectory() {
 
   useEffect(() => {
     let current = true;
-    setDirectory(undefined);
     portalRequest("businesses?page=" + page)
       .then((response) => response.json())
       .then((result) => {
@@ -122,6 +124,7 @@ export function BusinessDirectory() {
         )}
         <button disabled={saving}>Create business</button>
       </form>
+      <ProviderMigration onComplete={() => setRevision((value) => value + 1)} />
       {directory && (
         <>
           <h2>Registered businesses</h2>
@@ -165,7 +168,21 @@ export function BusinessDirectory() {
                     </div>
                   ))}
                 </dd>
+                {business.operational_state && (
+                  <>
+                    <dt>Operational state</dt>
+                    <dd>{business.operational_state}</dd>
+                  </>
+                )}
               </dl>
+              {["Organization", "Distributor", "Shop"].includes(
+                business.kind,
+              ) && (
+                <BusinessLifecycle
+                  id={business.id}
+                  onChange={() => setRevision((value) => value + 1)}
+                />
+              )}
             </article>
           ))}
           {page > 1 && (

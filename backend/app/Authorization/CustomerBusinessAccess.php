@@ -44,9 +44,14 @@ final class CustomerBusinessAccess
             ->join('customer_business_scopes as scope', function ($join): void {
                 $join->on('scope.user_id', '=', 'account.user_id')->on('scope.business_id', '=', 'entity.id');
             })
-            ->join('customer_permissions as permission', function ($join): void {
-                $join->on('permission.user_id', '=', 'account.user_id')->on('permission.business_id', '=', 'entity.id');
-            })
+            ->joinSub(
+                DB::table('customer_permissions')->where('user_id', $user)->select('business_id', 'action')
+                    ->union(OrganizationBusinessRoles::permissionsFor($user)),
+                'permission',
+                'permission.business_id',
+                '=',
+                'entity.id',
+            )
             ->whereColumn('entity.parent_id', 'tenant.organization_id')
             ->where('account.user_id', $user)
             ->where('account.state', 'Active')

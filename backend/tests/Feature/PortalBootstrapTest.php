@@ -53,12 +53,18 @@ final class PortalBootstrapTest extends TestCase
         $this->getJson('/api/v1/services')->assertOk()->assertJsonPath('data.0.id', $id);
         $this->postJson('/api/v1/services', $service)->assertConflict();
         $this->postJson("/api/v1/services/{$id}/capabilities", ['name' => 'Email', 'purpose' => 'Deliver email'])->assertCreated();
+        $this->getJson("/api/v1/services/{$id}/capabilities")->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.name', 'Email');
+        $this->getJson('/api/v1/services/018f0000-0000-7000-8000-000000000000/capabilities')->assertNotFound();
+        $other = $this->postJson('/api/v1/services', [...$service, 'name' => 'Other'])->assertCreated()->json('id');
+        $this->getJson("/api/v1/services/{$other}/capabilities")->assertOk()->assertJsonCount(0, 'data');
         $this->getJson('/api/v1/businesses')->assertOk()->assertJsonPath('data.0.kind', 'Main Portal');
         $this->postJson('/api/v1/businesses', [
             'kind' => 'Organization', 'legal_name' => 'Customer Ltd', 'professional_name' => 'Customer',
             'provider_id' => DB::table('portal_installation')->value('portal_id'), 'new_owner_name' => 'Customer owner',
         ])->assertCreated();
         DB::table('portal_grants')->delete();
+        $this->getJson("/api/v1/services/{$id}/capabilities")->assertForbidden();
         $this->postJson('/api/v1/services', $service)->assertForbidden();
         $this->getJson('/api/v1/services/categories')->assertForbidden();
         $this->postJson('/api/v1/logout')->assertNoContent();

@@ -20,6 +20,8 @@ export function ServiceRegistry({
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<Page>();
   const [selected, setSelected] = useState("");
+  const [capabilityPage, setCapabilityPage] = useState(1);
+  const [capabilities, setCapabilities] = useState<Page>();
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -37,6 +39,25 @@ export function ServiceRegistry({
       active = false;
     };
   }, [page, revision]);
+
+  useEffect(() => {
+    setCapabilities(undefined);
+    if (!selected) return;
+    let active = true;
+    portalRequest(
+      "services/" + selected + "/capabilities?page=" + capabilityPage,
+    )
+      .then((response) => response.json())
+      .then((value) => {
+        if (active) setCapabilities(value);
+      })
+      .catch((error: Error) => {
+        if (active) setMessage(error.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selected, capabilityPage, revision]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,7 +134,16 @@ export function ServiceRegistry({
           <ul>
             {result.data.map((s) => (
               <li key={s.id}>
-                <button onClick={() => setSelected(s.id)}>{s.name}</button>{" "}
+                <button
+                  type="button"
+                  aria-pressed={selected === s.id}
+                  onClick={() => {
+                    setCapabilityPage(1);
+                    setSelected(s.id);
+                  }}
+                >
+                  {s.name}
+                </button>{" "}
                 {s.purpose}
               </li>
             ))}
@@ -140,6 +170,32 @@ export function ServiceRegistry({
             </button>
           )}
         </>
+      )}
+      {selected && capabilities && (
+        <section aria-label="Registered capabilities">
+          <h2>Registered capabilities</h2>
+          {capabilities.data.length ? (
+            <ul>
+              {capabilities.data.map((item) => (
+                <li key={item.id}>
+                  <strong>{item.name}</strong> {item.purpose}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No capabilities registered for this service.</p>
+          )}
+          {capabilityPage > 1 && (
+            <button onClick={() => setCapabilityPage(capabilityPage - 1)}>
+              Previous capabilities
+            </button>
+          )}
+          {capabilities.next_page_url && (
+            <button onClick={() => setCapabilityPage(capabilityPage + 1)}>
+              Next capabilities
+            </button>
+          )}
+        </section>
       )}
       {selected && (
         <form key={selected} data-kind="capability" onSubmit={save}>

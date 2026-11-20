@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Authorization\MappingPermissions;
+use App\Configuration\OrganizationCredentialPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,28 +20,52 @@ use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 final class OrganizationUserController
 {
-    private const MODES = ['temporary_password', 'otp', 'both'];
+    public function __construct(
+        private readonly MainPortalAccess $access,
+        private readonly OrganizationCredentialPolicy $policy,
+    ) {}
 
-    private const MAPPING_ACTIONS = [
-        'Shop' => ['mapping.initiate', 'mapping.confirm', 'mapping.end'],
-        'Distributor' => ['mapping.verify', 'mapping.end'],
-    ];
+    public function effectivePolicy(string $tenant): JsonResponse
+    {
+        $this->access->requirePermission('organization_users.manage');
 
-    public function __construct(private readonly MainPortalAccess $access) {}
+        return response()->json($this->policy->resolve($tenant))->header('Cache-Control', 'no-store');
+    }
+
+    public function configureProvider(Request $request, string $provider): JsonResponse
+    {
+        $this->access->requirePermission('organization_users.manage');
+        abort_unless(DB::table('business_identities')->where('id', $provider)->whereIn('kind', ['Main Portal', 'Sub-Portal'])->exists(), 404);
+        $input = $request->validate(['mode' => ['required', Rule::in(OrganizationCredentialPolicy::MODES)]]);
+        DB::transaction(function () use ($provider, $input): void {
+            DB::table('business_identities')->where('id', $provider)->lockForUpdate()->first();
+            DB::table('provider_credential_defaults')->upsert([
+                'provider_id' => $provider, 'mode' => $input['mode'],
+            ], ['provider_id'], ['mode']);
+            $this->record($provider, 'organization_user.provider_default_changed');
+        });
+
+        return response()->json($input);
+    }
 
     public function configure(Request $request, string $tenant): JsonResponse
     {
         $this->access->requirePermission('organization_users.manage');
         abort_unless(DB::table('customer_tenants')->where('id', $tenant)->exists(), 404);
-        $input = $request->validate(['mode' => ['required', Rule::in(self::MODES)]]);
+        $input = $request->validate(['mode' => ['required', Rule::in([...OrganizationCredentialPolicy::MODES, 'inherit'])]]);
         DB::transaction(function () use ($tenant, $input): void {
-            DB::table('organization_credential_policies')->upsert([
-                'tenant_id' => $tenant, 'mode' => $input['mode'],
-            ], ['tenant_id'], ['mode']);
+            DB::table('customer_tenants')->where('id', $tenant)->lockForUpdate()->first();
+            if ($input['mode'] === 'inherit') {
+                DB::table('organization_credential_policies')->where('tenant_id', $tenant)->delete();
+            } else {
+                DB::table('organization_credential_policies')->upsert([
+                    'tenant_id' => $tenant, 'mode' => $input['mode'],
+                ], ['tenant_id'], ['mode']);
+            }
             $this->record($tenant, 'organization_user.policy_changed');
         });
 
-        return response()->json($input);
+        return $this->effectivePolicy($tenant);
     }
 
     public function store(Request $request, string $tenant): JsonResponse
@@ -54,11 +80,9 @@ final class OrganizationUserController
             'actions.*' => 'required|string|distinct',
         ]);
         $business = DB::table('business_identities')->where('id', $input['business_id'])->where('parent_id', $organization)->value('kind');
-        if (! isset(self::MAPPING_ACTIONS[$business]) || array_diff($input['actions'], self::MAPPING_ACTIONS[$business])) {
-            throw ValidationException::withMessages(['actions' => 'Select permitted actions for a Shop or Distributor in this Organization.']);
-        }
-        $mode = DB::table('organization_credential_policies')->where('tenant_id', $tenant)->value('mode');
-        abort_unless(in_array($mode, self::MODES, true), 409, 'Configure this Organization’s credential setup policy first.');
+        MappingPermissions::validate($business, $input['actions']);
+        $mode = $this->policy->resolve($tenant)['mode'];
+        abort_if($mode === null, 409, 'Configure an applicable credential setup policy first.');
         $this->requireDeliverableMailer();
 
         $id = Str::uuid7()->toString();

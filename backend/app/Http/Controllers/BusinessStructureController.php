@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Commercial\SubscriptionCoverage;
 use App\Domain\BusinessStructure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,7 +58,7 @@ final class BusinessStructureController
             $provider = $data['provider_id'] ?? null;
             $ownerIds = $this->resolveOwners($data, $parent);
             if ($provider !== null) {
-                $kind = DB::table('business_identities')->where('id', $provider)->value('kind');
+                $kind = DB::table('business_identities')->where('id', $provider)->lockForUpdate()->value('kind');
                 if (! in_array($kind, ['Main Portal', 'Sub-Portal'], true)) {
                     throw ValidationException::withMessages(['provider_id' => 'Select Main Portal or a Sub-Portal as the service provider.']);
                 }
@@ -70,6 +71,7 @@ final class BusinessStructureController
                 'professional_name' => $data['professional_name'],
                 'legal_name' => $data['legal_name'] ?? null,
                 'parent_id' => $parent,
+                'operational_state' => $data['kind'] === 'Sub-Portal' ? 'Active' : 'Draft',
             ]);
             foreach ($ownerIds as $ownerId) {
                 DB::table('ownership_links')->insert(['id' => (string) Str::uuid7(), 'business_id' => $id, 'owner_id' => $ownerId]);
@@ -78,6 +80,9 @@ final class BusinessStructureController
                 DB::table('customer_tenants')->insert(['id' => (string) Str::uuid7(), 'organization_id' => $id, 'provider_id' => $provider]);
             }
 
+            if ($parent !== null) {
+                SubscriptionCoverage::includeNewChild($parent, $id);
+            }
             DB::table('portal_events')->insert([
                 'id' => (string) Str::uuid7(), 'action' => 'business.created',
                 'actor_id' => Auth::id(), 'subject_id' => $id, 'recorded_at' => now(),
@@ -91,7 +96,7 @@ final class BusinessStructureController
     {
         if ($parent !== null) {
             $organization = DB::table('business_identities')->where('id', $parent)->where('kind', 'Organization')->lockForUpdate()->first();
-            if ($organization === null) {
+            if ($organization === null || $organization->operational_state === 'Closed') {
                 throw ValidationException::withMessages(['parent_id' => 'Select an Organization as the direct parent.']);
             }
             $ownerIds = DB::table('ownership_links')->where('business_id', $parent)->pluck('owner_id')->all();

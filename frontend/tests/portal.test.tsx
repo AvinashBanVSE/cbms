@@ -47,6 +47,7 @@ const json = (data: unknown) => Response.json(data);
 it("configures the portal, creates its owner, signs in, manages a service and signs out", async () => {
   let page = 1;
   let saved = false;
+  let capabilitySaved = false;
   request.mockImplementation(async (path, body) => {
     switch (path) {
       case "installation":
@@ -66,7 +67,17 @@ it("configures the portal, creates its owner, signs in, manages a service and si
         return json({ id: "first" });
       case "services/first/capabilities":
         expect(body?.name).toBe("Email");
+        capabilitySaved = true;
         return json({ id: "child" });
+      case "services/first/capabilities?page=1":
+        return json({
+          data: capabilitySaved
+            ? [{ id: "child", name: "Email", purpose: "Deliver email" }]
+            : [],
+          next_page_url: capabilitySaved ? "/next" : null,
+        });
+      case "services/first/capabilities?page=2":
+        return json({ data: [], next_page_url: null });
       case "services?page=1":
       case "services?page=2":
         page = path.endsWith("1") ? 1 : 2;
@@ -121,6 +132,15 @@ it("configures the portal, creates its owner, signs in, manages a service and si
   )!;
   form.querySelector<HTMLInputElement>('[name="name"]')!.value = "Email";
   await submit('form[data-kind="capability"]');
+  expect(
+    document.querySelector('[aria-label="Registered capabilities"]')
+      ?.textContent,
+  ).toContain("Email");
+  await click("Next capabilities");
+  expect(document.body.textContent).toContain(
+    "No capabilities registered for this service.",
+  );
+  await click("Previous capabilities");
   expect(document.body.textContent).toContain("Capability registered");
   await click("Next");
   expect(page).toBe(2);
@@ -253,6 +273,15 @@ it("loads the customer mapping workspace and sends each action to its assigned b
     if (path === "installation") return json({ stage: "ready" });
     if (path === "services/categories")
       throw new PortalRequestError("Access denied", 403);
+    if (path === "organization-access-delegations")
+      return json([
+        {
+          id: "grant",
+          tenant_id: "tenant",
+          business_id: "shop",
+          professional_name: "My Shop",
+        },
+      ]);
     if (path === "mapping-contexts")
       return json(
         ["initiate", "verify", "confirm", "end"].map((action) => ({
@@ -271,8 +300,11 @@ it("loads the customer mapping workspace and sends each action to its assigned b
     throw Error(path);
   });
   await render();
+  expect(
+    document.querySelector('[aria-label="Active delegations"]')?.textContent,
+  ).toContain("My Shop");
   input("party", "distributor");
-  await submit();
+  await submit("form:not([data-operation])");
   expect(document.body.textContent).toContain("shop-code");
   const selection =
     document.querySelector<HTMLSelectElement>("section select")!;
@@ -285,19 +317,23 @@ it("loads the customer mapping workspace and sends each action to its assigned b
   }
   await select("1");
   input("party", "shop");
-  input("code", "shop-code");
-  await submit();
+  document.querySelector<HTMLInputElement>(
+    'form:not([data-operation]) [name="code"]',
+  )!.value = "shop-code";
+  await submit("form:not([data-operation])");
   expect(request).toHaveBeenCalledWith(
     "distributors/distributor/mappings/m1/verify",
     { shop_id: "shop", code: "shop-code" },
   );
   await select("2");
   input("party", "distributor");
-  input("code", "distributor-code");
-  await submit();
+  document.querySelector<HTMLInputElement>(
+    'form:not([data-operation]) [name="code"]',
+  )!.value = "distributor-code";
+  await submit("form:not([data-operation])");
   expect(document.body.textContent).toContain("Mapping status: Active");
   await select("3");
-  await submit();
+  await submit("form:not([data-operation])");
   expect(document.body.textContent).toContain("Mapping already ended");
   await click("Sign out");
   expect(document.querySelector("h1")?.textContent).toBe("Sign in");
@@ -313,7 +349,12 @@ it("configures account setup and provisions an authorized Organization user", as
       case "services?page=1":
         return json({ data: [] });
       case "tenants/tenant/credential-policy":
-        return json(body);
+        return json({
+          mode: body?.mode ?? "otp",
+          source: body ? "organization" : "sub_portal",
+        });
+      case "providers/portal/credential-default":
+        return json({ mode: "otp" });
       case "tenants/tenant/organization-users":
         return json({ user_code: "AB1234", delivery: "failed" });
       case "tenants/tenant/organization-users/reissue":
@@ -333,6 +374,19 @@ it("configures account setup and provisions an authorized Organization user", as
       form + ' [name="' + field + '"]',
     )!.value = value;
   }
+  const provider = "form[data-operation=provider]";
+  const lookup = "form[data-operation=lookup]";
+  fillIn(provider, "provider", "portal");
+  fillIn(provider, "mode", "otp");
+  await submit(provider);
+  expect(request).toHaveBeenCalledWith("providers/portal/credential-default", {
+    mode: "otp",
+  });
+  fillIn(lookup, "tenant", "tenant");
+  await submit(lookup);
+  expect(document.body.textContent).toContain(
+    "Email one-time code · Sub-Portal",
+  );
   fillIn(policy, "tenant", "tenant");
   fillIn(policy, "mode", "both");
   await submit(policy);
@@ -384,4 +438,476 @@ it("sets a permanent password through the separate restricted setup screen", asy
   input("password_confirmation", "password-for-tests-only");
   await submit();
   expect(document.body.textContent).toContain("Account setup complete");
+});
+
+it("loads and changes individual business access controls independently", async () => {
+  const path = "tenants/tenant/organization-users/AA2000/business-access/shop";
+  request.mockImplementation(async (url, body) => {
+    if (url === "installation") return json({ stage: "ready" });
+    if (url === "services/categories") return json({ A1: "Identity" });
+    if (url === "services?page=1") return json({ data: [] });
+    if (url === path && body === undefined)
+      return json({
+        associated: true,
+        in_scope: true,
+        actions: ["mapping.initiate"],
+      });
+    if (url === path) return json(body);
+    throw new Error("Business access unavailable");
+  });
+  await render();
+  await click("Organization users");
+  const lookup = "form[data-operation=access-lookup]";
+  const edit = "form[data-operation=access-update]";
+  const field = (form: string, name: string) =>
+    document.querySelector<HTMLInputElement>(form + ' [name="' + name + '"]')!;
+  field(lookup, "tenant").value = "tenant";
+  field(lookup, "code").value = "AA2000";
+  field(lookup, "business").value = "shop";
+  await submit(lookup);
+  expect(field(edit, "associated").checked).toBe(true);
+  field(edit, "in_scope").checked = false;
+  await submit(edit);
+  expect(request).toHaveBeenCalledWith(path, {
+    associated: true,
+    in_scope: false,
+    actions: ["mapping.initiate"],
+  });
+  expect(document.body.textContent).toContain("Business access updated");
+  request.mockRejectedValueOnce(new Error("Change not saved"));
+  await submit(edit);
+  expect(document.body.textContent).toContain("Change not saved");
+  field(lookup, "business").value = "other";
+  await submit(lookup);
+  expect(document.querySelector(edit)).toBeNull();
+  expect(document.body.textContent).toContain("Business access unavailable");
+});
+
+it("grants and revokes a business access delegation from the administration screen", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    if (path === "tenants/tenant/businesses/shop/access-delegations") {
+      expect(body).toEqual({
+        code: "AA7654",
+        minutes: "15",
+        actions: ["mapping.initiate"],
+      });
+      return json({ id: "grant" });
+    }
+    if (path === "organization-access-delegations/grant/revoke")
+      return json({ status: "revoked" });
+    throw Error("Delegation unavailable");
+  });
+  await render();
+  await click("Organization users");
+  const create = "form[data-operation=delegation-create]";
+  const revoke = "form[data-operation=delegation-revoke]";
+  const fill = (form: string, name: string, value: string) => {
+    document.querySelector<HTMLInputElement>(
+      form + ' input[name="' + name + '"]',
+    )!.value = value;
+  };
+  fill(create, "tenant", "tenant");
+  fill(create, "business", "shop");
+  fill(create, "code", "AA7654");
+  fill(create, "minutes", "15");
+  document.querySelector<HTMLInputElement>(
+    create + ' input[value="mapping.initiate"]',
+  )!.checked = true;
+  await submit(create);
+  expect(document.body.textContent).toContain("Delegation ID: grant");
+  fill(revoke, "grant", "grant");
+  await submit(revoke);
+  expect(document.body.textContent).toContain("Delegation revoked.");
+  fill(revoke, "grant", "missing");
+  await submit(revoke);
+  expect(document.body.textContent).toContain("Delegation unavailable");
+});
+
+it("registers a role and changes the selected user's assignment", async () => {
+  const base = "tenants/tenant/businesses/shop/roles";
+  let created = false;
+  let pending = false;
+  const approvals = "tenants/tenant/businesses/shop/role-approvals";
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    if (path === base + "?page=1")
+      return json({
+        data: created
+          ? [
+              {
+                id: "role1",
+                name: "Shop liaison",
+                actions: ["mapping.confirm"],
+              },
+            ]
+          : [],
+        next_page_url: created ? "next" : null,
+      });
+    if (path === base + "?page=2")
+      return json({ data: [], next_page_url: null });
+    if (path === base) {
+      expect(body).toEqual({
+        name: "Shop liaison",
+        actions: ["mapping.confirm"],
+      });
+      created = true;
+      return json({ id: "role1" });
+    }
+    if (path === approvals + "/policy") {
+      expect(body).toEqual({
+        operation: "assign",
+        stages: [{ required: 2, reviewers: ["AA0011", "AA0012"] }],
+      });
+      return json({ stage_count: 1 });
+    }
+    if (path === approvals + "?page=1")
+      return json({
+        data: pending
+          ? [
+              {
+                id: "a1",
+                assign: true,
+                stage: 0,
+                role: "Shop liaison",
+                code: "AA4010",
+              },
+              {
+                id: "a2",
+                assign: false,
+                stage: 0,
+                role: "Spare role",
+                code: "AA4011",
+              },
+            ]
+          : [],
+        next_page_url: "next",
+      });
+    if (path === approvals + "?page=2")
+      return json({ data: [], next_page_url: null });
+    if (path === approvals + "/a1/decision") {
+      expect(body).toEqual({ decision: "approve" });
+      return json({ status: "pending" });
+    }
+    if (path === approvals + "/a2/decision") {
+      expect(body).toEqual({ decision: "reject" });
+      pending = false;
+      return json({ status: "rejected" });
+    }
+    if (path.endsWith("/role1/assign")) {
+      pending = true;
+      return Response.json({ id: "a1", status: "pending" }, { status: 202 });
+    }
+    if (path.endsWith("/role1/revoke")) return json({ assigned: false });
+    throw Error("Business unavailable");
+  });
+  await render();
+  await click("Organization users");
+  const lookup = "form[data-operation=role-lookup]";
+  const create = "form[data-operation=role-create]";
+  const assignment = "form[data-operation=role-assignment]";
+  const set = (form: string, name: string, value: string) => {
+    document.querySelector<HTMLInputElement>(
+      form + ' [name="' + name + '"]',
+    )!.value = value;
+  };
+  set(lookup, "tenant", "tenant");
+  set(lookup, "business", "shop");
+  await submit(lookup);
+  set(create, "name", "Shop liaison");
+  document.querySelector<HTMLInputElement>(
+    create + ' [value="mapping.confirm"]',
+  )!.checked = true;
+  await submit(create);
+  expect(document.body.textContent).toContain("Role created.");
+  await click("Next roles");
+  expect(document.querySelector(assignment)).toBeNull();
+  await click("Previous roles");
+  set(assignment, "code", "AA4010");
+  await click("Assign role");
+  expect(request).toHaveBeenCalledWith(base + "/role1/assign", {
+    code: "AA4010",
+  });
+  expect(document.body.textContent).toContain("Awaiting approval: a1");
+  const policy = "form[data-operation=role-approval-policy]";
+  document.querySelector<HTMLTextAreaElement>(policy + " textarea")!.value =
+    "wrong";
+  await submit(policy);
+  expect(document.body.textContent).toContain("Enter the required count");
+  document.querySelector<HTMLTextAreaElement>(policy + " textarea")!.value =
+    "2: AA0011, AA0012";
+  await submit(policy);
+  expect(document.body.textContent).toContain(
+    "Approval policy saved. Stages: 1",
+  );
+  await click("Load pending approvals");
+  expect(document.body.textContent).toContain("Assign Shop liaison");
+  await click("Next approvals");
+  expect(document.body.textContent).not.toContain("Assign Shop liaison");
+  await click("Previous approvals");
+  await click("Approve");
+  expect(document.body.textContent).toContain("Request status: pending");
+  const reject = document.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Pending role changes"] li button',
+  )[3];
+  await act(async () => reject.click());
+  expect(document.body.textContent).toContain("Request status: rejected");
+  set(assignment, "code", "AA4010");
+  await click("Remove role");
+  expect(request).toHaveBeenCalledWith(base + "/role1/revoke", {
+    code: "AA4010",
+  });
+  set(lookup, "business", "unknown");
+  await submit(lookup);
+  expect(document.body.textContent).toContain("Business unavailable");
+});
+
+it("manages an Organization account state independently of business access", async () => {
+  const base = "tenants/tenant/organization-users/AA7111/lifecycle";
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    if (path === base && !body)
+      return json({
+        state: "Active",
+        allowed_transitions: ["Suspended", "Terminated"],
+      });
+    if (path === base && body?.state === "Suspended")
+      return json({
+        state: "Suspended",
+        allowed_transitions: ["Active", "Terminated"],
+      });
+    if (path === base && body?.state === "Terminated")
+      return json({ state: "Terminated", allowed_transitions: [] });
+    throw Error("Account unavailable");
+  });
+  await render();
+  await click("Organization users");
+  const lookup = "form[data-operation=account-state-lookup]";
+  const update = "form[data-operation=account-state-update]";
+  const field = (form: string, name: string) =>
+    document.querySelector<HTMLInputElement>(form + ' [name="' + name + '"]')!;
+  field(lookup, "tenant").value = "tenant";
+  field(lookup, "code").value = "AA7111";
+  await submit(lookup);
+  expect(document.body.textContent).toContain("AA7111 · Active");
+  field(update, "reason").value = "Review";
+  await submit(update);
+  expect(request).toHaveBeenCalledWith(base, {
+    state: "Suspended",
+    expected_state: "Active",
+    reason: "Review",
+  });
+  const select = field(update, "target");
+  await act(async () => {
+    select.value = "Terminated";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(
+    document.querySelector<HTMLButtonElement>(update + " button")!.disabled,
+  ).toBe(true);
+  field(update, "reason").value = "Close account";
+  await act(async () =>
+    document
+      .querySelector<HTMLInputElement>(update + ' input[type="checkbox"]')!
+      .click(),
+  );
+  await submit(update);
+  expect(document.body.textContent).toContain("AA7111 · Terminated");
+  expect(document.querySelector(update)).toBeNull();
+  field(lookup, "code").value = "AA7112";
+  await submit(lookup);
+  expect(document.body.textContent).toContain("Account unavailable");
+});
+
+it("applies a business lifecycle transition and refreshes the business directory", async () => {
+  const path = "businesses/test-org/lifecycle";
+  let state = "Active";
+  request.mockImplementation(async (url, body) => {
+    if (url === "installation") return json({ stage: "ready" });
+    if (url === "services/categories") return json({ A1: "Identity" });
+    if (url === "services?page=1") return json({ data: [] });
+    if (url === "businesses?page=1")
+      return json({
+        data: [
+          {
+            id: "test-org",
+            kind: "Organization",
+            professional_name: "Western Network",
+            operational_state: state,
+            owners: [],
+          },
+        ],
+      });
+    if (url === path && !body)
+      return json({
+        state,
+        version: 0,
+        allowed_transitions: ["Suspended", "Deactivated"],
+      });
+    if (url === path && typeof body?.operation_id === "string") {
+      expect(body).toMatchObject({
+        state: "Suspended",
+        expected_version: 0,
+        reason: "Temporary review",
+      });
+      state = "Suspended";
+      return json({ state, changed_businesses: 2, changed_mappings: 1 });
+    }
+    throw Error("Business unavailable");
+  });
+  await render();
+  await click("Businesses");
+  await click("Load business state");
+  expect(document.body.textContent).toContain("Current state: Active");
+  const operation = "form[data-operation=business-lifecycle]";
+  document.querySelector<HTMLTextAreaElement>(
+    operation + ' [name="reason"]',
+  )!.value = "Temporary review";
+  await submit(operation);
+  expect(document.body.textContent).toContain("New state: Suspended");
+  expect(document.body.textContent).toContain("Mappings updated: 1");
+});
+
+it("previews a provider migration and submits only a valid reviewed scope", async () => {
+  let eligible = false;
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1" || path === "businesses?page=1")
+      return json({ data: [] });
+    if (path === "provider-migrations/preview")
+      return json({
+        tenants: [
+          {
+            tenant_id: "tenant",
+            name: "Western Network",
+            businesses: [{ id: "one" }],
+          },
+        ],
+        blocked: eligible ? {} : { tenant: ["Policy mismatch"] },
+        can_execute: eligible,
+        fingerprint: "snapshot",
+      });
+    if (path === "provider-migrations/execute") {
+      expect(body).toMatchObject({
+        source_id: "original",
+        destination_id: "destination",
+        tenant_id: "tenant",
+        fingerprint: "snapshot",
+        reason: "Consolidation",
+      });
+      return json({ tenants_migrated: 1 });
+    }
+    throw Error("Provider unavailable");
+  });
+  await render();
+  await click("Businesses");
+  const preview = "form[data-operation=provider-migration-preview]";
+  const execute = "form[data-operation=provider-migration-execute]";
+  const fill = (form: string, name: string, value: string) =>
+    (document.querySelector<HTMLInputElement>(
+      form + ' [name="' + name + '"]',
+    )!.value = value);
+  fill(preview, "source_id", "original");
+  fill(preview, "destination_id", "destination");
+  fill(preview, "tenant_id", "tenant");
+  await submit(preview);
+  expect(document.body.textContent).toContain("Policy mismatch");
+  expect(document.querySelector(execute)).toBeNull();
+  eligible = true;
+  await submit(preview);
+  fill(execute, "reason", "Consolidation");
+  await submit(execute);
+  expect(document.body.textContent).toContain(
+    "Migration completed. Tenants moved: 1",
+  );
+});
+
+it("publishes a Plan Version and registers a subscription with explicit coverage", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "services/categories") return json({ A1: "Identity" });
+    if (path === "services?page=1") return json({ data: [] });
+    if (path.startsWith("commercial?"))
+      return json({
+        data: [{ id: "saved", entitlements: [{ code: "portal.reports" }] }],
+        next_page_url: path.endsWith("1") ? "next" : null,
+      });
+    if (path === "commercial/plans/plan/versions") {
+      expect(body).toEqual({
+        amount_paise: "12345",
+        term_days: "30",
+        entitlements: ["portal.reports"],
+      });
+      return json({ id: "version1", version: 1 });
+    }
+    if (path === "commercial/subscriptions") {
+      expect(body).toEqual({
+        account_id: "account",
+        plan_version_id: "version1",
+        starts_on: "2032-02-28",
+        renewal_mode: "manual",
+        coverage_mode: "selected",
+        business_ids: ["shop", "distributor"],
+      });
+      return json({ id: "subscription1", state: "Pending Activation" });
+    }
+    if (path === "commercial/accounts") return json({ id: "account" });
+    throw Error("Commercial record unavailable");
+  });
+  await render();
+  await click("Commercial");
+  const form = "form[data-operation=commercial-create]";
+  const set = (field: string, value: string) => {
+    document.querySelector<HTMLInputElement>(
+      form + ' [name="' + field + '"]',
+    )!.value = value;
+  };
+  const select = document.querySelector<HTMLSelectElement>(
+    "section > label select",
+  )!;
+  const change = (value: string) =>
+    act(async () => {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  set("tenant_id", "tenant");
+  set("provider_id", "provider");
+  set("billing_party", "Organization legal name");
+  await submit(form);
+  expect(document.body.textContent).toContain("Saved: account");
+  await click("Next records");
+  await click("Previous records");
+  await change("versions");
+  set("plan_id", "plan");
+  set("amount_paise", "12345");
+  set("term_days", "30");
+  set("entitlements", "portal.reports");
+  await submit(form);
+  expect(document.body.textContent).toContain("Saved: version1");
+  await change("subscriptions");
+  set("account_id", "account");
+  set("plan_version_id", "version1");
+  set("starts_on", "2032-02-28");
+  set("coverage_mode", "selected");
+  set("business_ids", "shop, distributor");
+  await submit(form);
+  expect(document.body.textContent).toContain(
+    "Pending Activation · Saved: subscription1",
+  );
+  await change("plans");
+  set("provider_id", "unknown");
+  set("name", "Plan");
+  await submit(form);
+  expect(document.body.textContent).toContain("Commercial record unavailable");
+  await click("Load commercial records");
+  expect(
+    document.querySelector('[aria-label="Commercial records"]')?.textContent,
+  ).toContain("saved");
 });

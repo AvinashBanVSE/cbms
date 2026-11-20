@@ -4,12 +4,21 @@ declare(strict_types=1);
 
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
+use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
+use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\InstallationController;
+use App\Http\Controllers\OrganizationAccessController;
+use App\Http\Controllers\OrganizationAccountLifecycleController;
 use App\Http\Controllers\OrganizationCredentialController;
+use App\Http\Controllers\OrganizationDelegationController;
+use App\Http\Controllers\OrganizationRoleController;
 use App\Http\Controllers\OrganizationUserController;
+use App\Http\Controllers\RoleApprovalController;
+use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
+use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -22,16 +31,44 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('installation/owner', [InstallationController::class, 'owner'])->middleware('throttle:5,1,owner');
         Route::post('login', function (Request $request) {
             $credentials = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email', 'password' => 'required|string']);
-            abort_unless(Auth::attemptWhen($credentials, static function ($user): bool {
-                $state = DB::table('customer_accounts')->where('user_id', $user->getAuthIdentifier())->value('state');
+            $version = null;
+            abort_unless(Auth::attemptWhen($credentials, static function ($user) use (&$version): bool {
+                $account = DB::table('customer_accounts')->where('user_id', $user->getAuthIdentifier())->first(['state', 'session_version']);
+                $version = $account === null ? null : (int) $account->session_version;
 
-                return $state === null || $state === 'Active';
+                return $account === null || $account->state === 'Active';
             }), 401);
             $request->session()->regenerate();
+            $request->session()->put(ValidateOrganizationSession::VERSION, $version);
 
             return response()->noContent();
         })->middleware('throttle:5,1,login');
     });
+    Route::prefix('tenants/{tenant}/businesses/{business}/roles')->whereUuid(['tenant', 'business'])->group(function (): void {
+        Route::get('/', [OrganizationRoleController::class, 'index']);
+        Route::post('/', [OrganizationRoleController::class, 'store']);
+        Route::post('{role}/assign', [OrganizationRoleController::class, 'assign'])->whereUuid('role');
+        Route::post('{role}/revoke', [OrganizationRoleController::class, 'revoke'])->whereUuid('role');
+    });
+    Route::prefix('tenants/{tenant}/businesses/{business}/role-approvals')->whereUuid(['tenant', 'business'])->group(function (): void {
+        Route::get('/', [RoleApprovalController::class, 'index']);
+        Route::post('policy', [RoleApprovalController::class, 'policy']);
+        Route::post('{approval}/decision', [RoleApprovalController::class, 'decide'])->whereUuid('approval');
+    });
+    Route::get('tenants/{tenant}/organization-users/{code}/lifecycle', [OrganizationAccountLifecycleController::class, 'show'])
+        ->whereUuid('tenant')->where('code', '[A-Z]{2}[0-9]{4}');
+    Route::post('tenants/{tenant}/organization-users/{code}/lifecycle', [OrganizationAccountLifecycleController::class, 'transition'])
+        ->whereUuid('tenant')->where('code', '[A-Z]{2}[0-9]{4}');
+    Route::get('organization-access-delegations', [OrganizationDelegationController::class, 'active']);
+    Route::post('tenants/{tenant}/businesses/{business}/access-delegations', [OrganizationDelegationController::class, 'grant'])
+        ->whereUuid(['tenant', 'business']);
+    Route::post('organization-access-delegations/{grant}/revoke', [OrganizationDelegationController::class, 'revoke'])->whereUuid('grant');
+    Route::get('tenants/{tenant}/organization-users/{code}/business-access/{business}', [OrganizationAccessController::class, 'show'])
+        ->whereUuid(['tenant', 'business'])->where('code', '[A-Z]{2}[0-9]{4}');
+    Route::post('tenants/{tenant}/organization-users/{code}/business-access/{business}', [OrganizationAccessController::class, 'update'])
+        ->whereUuid(['tenant', 'business'])->where('code', '[A-Z]{2}[0-9]{4}');
+    Route::get('tenants/{tenant}/credential-policy', [OrganizationUserController::class, 'effectivePolicy'])->whereUuid('tenant');
+    Route::post('providers/{provider}/credential-default', [OrganizationUserController::class, 'configureProvider'])->whereUuid('provider');
     Route::post('tenants/{tenant}/credential-policy', [OrganizationUserController::class, 'configure'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/organization-users', [OrganizationUserController::class, 'store'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/organization-users/reissue', [OrganizationUserController::class, 'reissue'])->whereUuid('tenant')->middleware('throttle:5,1,organization-reissue');
@@ -46,10 +83,23 @@ Route::prefix('api/v1')->group(function (): void {
         ->whereUuid(['shop', 'mapping'])->middleware('throttle:10,1,mapping-confirm');
     Route::post('businesses/{business}/mappings/{mapping}/end', [BusinessMappingController::class, 'end'])
         ->whereUuid(['business', 'mapping']);
+    Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
+    Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');
+    Route::prefix('commercial')->group(function (): void {
+        Route::get('/', [CommercialController::class, 'index']);
+        Route::post('accounts', [CommercialController::class, 'account']);
+        Route::post('entitlements', [CommercialController::class, 'entitlement']);
+        Route::post('plans', [CommercialController::class, 'plan']);
+        Route::post('plans/{plan}/versions', [CommercialController::class, 'publish'])->whereUuid('plan');
+        Route::post('subscriptions', [CommercialController::class, 'subscription']);
+    });
+    Route::post('provider-migrations/preview', [ServiceProviderMigrationController::class, 'preview']);
+    Route::post('provider-migrations/execute', [ServiceProviderMigrationController::class, 'execute']);
     Route::get('businesses', [BusinessStructureController::class, 'index']);
     Route::post('businesses', [BusinessStructureController::class, 'store']);
     Route::get('services', [ServiceRegistryController::class, 'index']);
     Route::post('services', [ServiceRegistryController::class, 'createService']);
+    Route::get('services/{service}/capabilities', [ServiceRegistryController::class, 'capabilities'])->whereUuid('service');
     Route::post('services/{service}/capabilities', [ServiceRegistryController::class, 'createCapability'])->whereUuid('service');
     Route::get('services/categories', function (MainPortalAccess $access) {
         $access->requirePermission('service_catalogue.view');

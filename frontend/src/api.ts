@@ -7,9 +7,17 @@ export class PortalRequestError extends Error {
   }
 }
 
+type RequestValue =
+  | string
+  | number
+  | boolean
+  | null
+  | RequestValue[]
+  | { [key: string]: RequestValue };
+
 export async function portalRequest(
   path: string,
-  body?: Record<string, string | string[]>,
+  body?: Record<string, RequestValue>,
   setupCode?: string,
 ): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -37,9 +45,15 @@ export async function portalRequest(
       403: "Access denied. Check your permission or setup code.",
       409: path.startsWith("installation/")
         ? "The installation stage has changed. Reload this page."
-        : /organization-users|organization-setup/.test(path)
-          ? "Account setup is unavailable in its current state. Check the Organization policy or return to sign in."
-          : "This name is already registered in this context.",
+        : path.startsWith("provider-migrations/")
+          ? "The migration scope changed or requires correction. Preview it again."
+          : path.startsWith("businesses/") && path.endsWith("/lifecycle")
+            ? "The business state changed, or the requested transition is unavailable."
+            : path.endsWith("/lifecycle")
+              ? "The account state changed or this transition is unavailable. Load the account state again."
+              : /organization-users|organization-setup/.test(path)
+                ? "Account setup is unavailable in its current state. Check the Organization policy or return to sign in."
+                : "This name is already registered in this context.",
       419: "Your session has expired. Reload this page and try again.",
       429: "Too many attempts. Please try again later.",
     };
