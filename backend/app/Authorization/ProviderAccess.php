@@ -30,11 +30,17 @@ final class ProviderAccess
     public static function sessionAccount(string $user): ?object
     {
         $account = DB::table('customer_accounts')->where('user_id', $user)->first(['state', 'session_version']);
+        $setups = $account === null ? 'provider_user_setups' : 'organization_user_setups';
 
-        return $account ?? DB::table('provider_accounts as account')
+        $account ??= DB::table('provider_accounts as account')
             ->join('business_identities as provider', 'provider.id', '=', 'account.provider_id')
             ->where('account.user_id', $user)->select('account.session_version')
             ->selectRaw("CASE WHEN provider.kind = 'Sub-Portal' AND provider.operational_state = 'Active' THEN account.state ELSE 'Suspended' END AS state")
             ->first();
+        if ($account?->state === 'Active' && DB::table($setups)->where(['user_id' => $user, 'purpose' => 'recovery'])->exists()) {
+            $account->state = 'Password Change Required';
+        }
+
+        return $account;
     }
 }

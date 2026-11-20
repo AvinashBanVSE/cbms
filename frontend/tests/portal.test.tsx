@@ -310,6 +310,13 @@ it("provisions, reissues and terminates Sub-Portal user accounts", async () => {
       expect(body).toEqual({ code: "AA6190", reason: "Access withdrawn" });
       return json({ state: "Terminated" });
     }
+    if (path === "providers/provider/users/recover") {
+      expect(body).toEqual({
+        code: "AA6190",
+        reason: "Verified staff account",
+      });
+      return json({ delivery: "sent" });
+    }
     throw new Error(path);
   });
   await render();
@@ -331,6 +338,17 @@ it("provisions, reissues and terminates Sub-Portal user accounts", async () => {
   fill("reissue", "code", "AA6190");
   await submit(providerForm("reissue"));
   expect(document.body.textContent).toContain("Email failed.");
+  const recovery = 'form[data-operation="account-recovery"]';
+  document.querySelector<HTMLInputElement>(
+    recovery + ' [name="scope"]',
+  )!.value = "provider";
+  document.querySelector<HTMLInputElement>(recovery + ' [name="code"]')!.value =
+    "AA6190";
+  document.querySelector<HTMLInputElement>(
+    recovery + ' [name="reason"]',
+  )!.value = "Verified staff account";
+  await submit(recovery);
+  expect(document.body.textContent).toContain("Temporary password sent");
   fill("revoke", "provider", "provider");
   fill("revoke", "code", "AA6190");
   fill("revoke", "reason", "Access withdrawn");
@@ -380,6 +398,43 @@ it("binds Organization onboarding to the authenticated tenant", async () => {
     '[aria-label="Organization onboarding"] form:not([data-operation])',
   );
   expect(workspace.textContent).toContain("User Code: AA3000");
+});
+
+it("issues recovery only in the assigned Organization and reports the delivery outcome", async () => {
+  let deliveries = 0;
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({
+        ...adminWorkspace,
+        administration: [],
+        organization_recovery: {
+          tenant_id: "tenant",
+          professional_name: "Organization A",
+        },
+      });
+    if (path === "tenants/tenant/organization-users/recover") {
+      expect(body).toEqual({
+        code: "AA4101",
+        reason: "Verified account holder",
+      });
+      return json({ delivery: deliveries++ === 0 ? "failed" : "sent" });
+    }
+    throw new Error(path);
+  });
+  await render();
+  const form = 'form[data-operation="account-recovery"]';
+  expect(
+    document.querySelector('[aria-label="Organization account recovery"]')
+      ?.textContent,
+  ).toContain("Organization A");
+  expect(document.querySelector(form + ' input[name="scope"]')).toBeNull();
+  input("code", "AA4101");
+  input("reason", "Verified account holder");
+  await submit(form);
+  expect(document.body.textContent).toContain("Email delivery failed");
+  await submit(form);
+  expect(document.body.textContent).toContain("Temporary password sent");
 });
 
 it("keeps sign out available for an authenticated account without assignments", async () => {

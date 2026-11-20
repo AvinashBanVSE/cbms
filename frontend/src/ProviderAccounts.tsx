@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { portalRequest } from "./api";
+import { AccountRecovery } from "./AccountRecovery";
 
 export function ProviderAccounts() {
   const [notice, setNotice] = useState("");
@@ -98,6 +99,7 @@ export function ProviderAccounts() {
         <button disabled={busy}>Terminate Sub-Portal user</button>
       </form>
       <p role="status">{notice}</p>
+      <AccountRecovery provider />
     </>
   );
 }

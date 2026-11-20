@@ -80,11 +80,25 @@ final class ProviderAccountTest extends TestCase
         $this->postJson($staff, $input)->assertForbidden();
 
         $this->actingAs($operatorUser)->withSession([Auth::guard('web')->getName() => $operator, ValidateOrganizationSession::VERSION => null]);
+        $recovery = ['code' => $code, 'reason' => 'Verified account recovery'];
+        $this->postJson("/api/v1/providers/{$other}/users/recover", $recovery)->assertNotFound();
+        $this->postJson($staff.'/recover', $recovery)->assertOk()->assertJsonPath('delivery', 'sent');
+        preg_match('/Temporary password: (\w+)/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $temporary);
+        $this->postJson('/api/v1/logout')->assertNoContent();
+        $this->postJson('/api/v1/login', $login)->assertUnauthorized();
+        $this->postJson('/api/v1/organization-setup/verify', ['code' => $code, 'temporary_password' => $temporary[1]])->assertOk();
+        $replacement = 'new-test-only-provider-password';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $replacement, 'password_confirmation' => $replacement])->assertOk();
+        $login['password'] = $replacement;
+        $this->postJson('/api/v1/login', $login)->assertNoContent();
+        $this->getJson($directory)->assertOk();
+
+        $this->actingAs($operatorUser)->withSession([Auth::guard('web')->getName() => $operator, ValidateOrganizationSession::VERSION => null]);
         $revoke = ['code' => $code, 'reason' => 'Provider authorization withdrawn'];
         $this->postJson("/api/v1/providers/{$other}/users/revoke", $revoke)->assertNotFound();
         $this->postJson($staff.'/revoke', $revoke)->assertOk()->assertJsonPath('state', 'Terminated');
         $this->postJson($staff.'/revoke', $revoke)->assertConflict();
-        $this->actingAs($user)->withSession([Auth::guard('web')->getName() => $user->id, ValidateOrganizationSession::VERSION => 0]);
+        $this->actingAs($user)->withSession([Auth::guard('web')->getName() => $user->id, ValidateOrganizationSession::VERSION => 1]);
         $this->getJson($directory)->assertUnauthorized();
         $this->postJson('/api/v1/login', $login)->assertUnauthorized();
         $this->assertDatabaseHas('portal_events', ['subject_id' => $user->id, 'action' => 'provider_user.terminated']);

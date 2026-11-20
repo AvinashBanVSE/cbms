@@ -29,6 +29,7 @@ final class WorkspaceAccessController
         $workspaces = array_values(array_intersect_key($entries, array_fill_keys($grants, true)));
 
         $organization = $onboarding->contextFor((string) $user);
+        $recovery = $onboarding->contextFor((string) $user, OrganizationOnboardingAccess::RECOVERY);
         $provider = $providers->directoryFor((string) $user);
 
         return response()->json([
@@ -36,6 +37,7 @@ final class WorkspaceAccessController
             'mapping_contexts' => $business->mappingContexts(),
             'delegations' => $delegation->summariesFor((string) $user),
             ...($organization === null ? [] : ['organization_onboarding' => $organization]),
+            ...($recovery === null ? [] : ['organization_recovery' => $recovery]),
             ...($provider === null ? [] : ['provider_directory' => $provider]),
         ])->header('Cache-Control', 'no-store');
     }

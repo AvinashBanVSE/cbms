@@ -422,6 +422,74 @@ final class OrganizationUserSetupTest extends TestCase
         $this->getJson($path.'/credential-policy')->assertForbidden();
     }
 
+    public function test_scoped_recovery_invalidates_sessions_and_requires_a_new_password(): void
+    {
+        [$tenant, , $administrator] = $this->fixture();
+        [$otherTenant] = $this->fixtureForOtherOrganization();
+        $transport = new ArrayTransport;
+        Mail::extend('memory-test', static fn () => $transport);
+        config(['mail.default' => 'memory-test', 'mail.mailers.memory-test.transport' => 'memory-test']);
+        $organization = DB::table('customer_tenants')->where('id', $tenant)->value('organization_id');
+        $manager = Str::uuid7()->toString();
+        $employee = Str::uuid7()->toString();
+        $old = 'previous-test-only-account-password';
+        foreach ([$manager => 'AA8811', $employee => 'AA8812'] as $id => $code) {
+            DB::table('users')->insert(['id' => $id, 'code' => $code, 'email' => $code.'@example.test', 'password' => Hash::make($old)]);
+            DB::table('customer_accounts')->insert(['user_id' => $id, 'tenant_id' => $tenant, 'state' => 'Active']);
+        }
+        $binding = ['user_id' => $manager, 'business_id' => $organization];
+        DB::table('customer_business_associations')->insert([...$binding, 'active' => true]);
+        DB::table('customer_business_scopes')->insert($binding);
+        DB::table('customer_permissions')->insert([...$binding, 'action' => 'organization_users.provision']);
+        $managerUser = User::findOrFail($manager);
+        $this->actingAs($managerUser);
+        $route = "/api/v1/tenants/{$tenant}/organization-users/recover";
+        $request = ['code' => 'AA8812', 'reason' => 'User verified by the Organization'];
+        $this->postJson($route, $request)->assertForbidden();
+        DB::table('customer_permissions')->insert([...$binding, 'action' => 'organization_users.recover']);
+        $this->getJson('/api/v1/workspace-access')->assertJsonPath('organization_recovery.tenant_id', $tenant);
+        $this->postJson(str_replace($tenant, $otherTenant, $route), $request)->assertForbidden();
+        $this->postJson($route, [...$request, 'code' => 'AA8811'])->assertForbidden();
+        $this->postJson($route, $request)->assertOk()->assertExactJson(['delivery' => 'sent']);
+        $this->postJson($route, $request)->assertTooManyRequests();
+        $this->assertDatabaseHas('customer_accounts', ['user_id' => $employee, 'state' => 'Active', 'session_version' => 1]);
+        $body = $transport->messages()->last()->getOriginalMessage()->getTextBody();
+        $this->assertStringNotContainsString('://', $body);
+        preg_match('/Temporary password: (\w+)/', $body, $secret);
+        $this->actingAs(User::findOrFail($employee))->withSession([
+            Auth::guard('web')->getName() => $employee, ValidateOrganizationSession::VERSION => 0,
+        ]);
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
+        $credentials = ['code' => 'AA8812', 'email' => 'AA8812@example.test'];
+        $this->postJson('/api/v1/login', [...$credentials, 'password' => $old])->assertUnauthorized();
+        $this->postJson('/api/v1/login', [...$credentials, 'password' => $secret[1]])->assertUnauthorized();
+        $expiredProof = ['code' => 'AA8812', 'temporary_password' => $secret[1]];
+        $this->travel(16)->minutes();
+        $this->postJson('/api/v1/organization-setup/verify', $expiredProof)->assertUnprocessable();
+        $this->actingAs($managerUser);
+        $this->postJson($route, $request)->assertOk()->assertExactJson(['delivery' => 'sent']);
+        preg_match('/Temporary password: (\w+)/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $renewed);
+        $this->postJson('/api/v1/logout')->assertNoContent();
+        $proof = ['code' => 'AA8812', 'temporary_password' => $renewed[1]];
+        $this->postJson('/api/v1/organization-setup/verify', $proof)->assertOk();
+        $this->postJson('/api/v1/organization-setup/verify', $proof)->assertUnprocessable();
+        $this->mock(UncompromisedVerifier::class)->shouldReceive('verify')->andReturn(true);
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $old, 'password_confirmation' => $old])->assertUnprocessable();
+        $replacement = 'new-test-only-recovered-password';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $replacement, 'password_confirmation' => $replacement])->assertOk();
+        $this->postJson('/api/v1/login', [...$credentials, 'password' => $replacement])->assertNoContent();
+        $this->assertDatabaseHas('portal_events', ['action' => 'account.password_recovery_completed', 'subject_id' => $employee]);
+        $this->assertDatabaseHas('portal_events', ['action' => 'account.password_recovery_started', 'subject_id' => $employee, 'actor_id' => $manager]);
+        $this->actingAs($administrator);
+        $this->postJson("/api/v1/tenants/{$tenant}/organization-users/revoke-onboarding", [
+            'code' => 'AA8811', 'permission' => 'organization_users.recover',
+        ])->assertOk();
+        $this->actingAs($managerUser);
+        $this->postJson($route, $request)->assertForbidden();
+        $this->getJson('/api/v1/workspace-access')->assertJsonMissingPath('organization_recovery')
+            ->assertJsonPath('organization_onboarding.tenant_id', $tenant);
+    }
+
     private function fixtureForOtherOrganization(): array
     {
         $organization = Str::uuid7()->toString();

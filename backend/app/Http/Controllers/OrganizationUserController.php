@@ -89,8 +89,8 @@ final class OrganizationUserController
                 abort_unless($mainPortal, 403);
                 abort_unless(DB::table('business_identities')->where(['id' => $organization, 'kind' => 'Organization'])
                     ->where('operational_state', '!=', 'Closed')->lockForUpdate()->first(['id']) !== null, 422);
-                if ($input['actions'] !== [OrganizationOnboardingAccess::PERMISSION]) {
-                    throw ValidationException::withMessages(['actions' => 'Select the Organization onboarding permission for an Organization-level account.']);
+                if (array_diff($input['actions'], [OrganizationOnboardingAccess::PERMISSION, OrganizationOnboardingAccess::RECOVERY])) {
+                    throw ValidationException::withMessages(['actions' => 'Select applicable Organization-level account permissions.']);
                 }
             } else {
                 $business = DB::table('business_identities')->where('id', $input['business_id'])
@@ -136,7 +136,10 @@ final class OrganizationUserController
     public function revokeOnboarding(Request $request, string $tenant): JsonResponse
     {
         $this->access->requirePermission('organization_users.manage');
-        $data = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
+        $data = $request->validate([
+            'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
+            'permission' => ['sometimes', Rule::in([OrganizationOnboardingAccess::PERMISSION, OrganizationOnboardingAccess::RECOVERY])],
+        ]);
         DB::transaction(function () use ($tenant, $data): void {
             $context = DB::table('customer_accounts as account')
                 ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
@@ -144,12 +147,14 @@ final class OrganizationUserController
                 ->where('account.tenant_id', $tenant)->where('users.code', $data['code'])->lockForUpdate()
                 ->first(['account.user_id', 'tenant.organization_id']);
             abort_if($context === null, 404);
+            $permission = $data['permission'] ?? OrganizationOnboardingAccess::PERMISSION;
             $removed = DB::table('customer_permissions')->where([
                 'user_id' => $context->user_id, 'business_id' => $context->organization_id,
-                'action' => OrganizationOnboardingAccess::PERMISSION,
+                'action' => $permission,
             ])->delete();
             abort_unless($removed === 1, 404);
-            $this->record($context->user_id, 'organization_user.onboarding_authority_revoked');
+            $this->record($context->user_id, $permission === OrganizationOnboardingAccess::RECOVERY
+                ? 'organization_user.recovery_authority_revoked' : 'organization_user.onboarding_authority_revoked');
         }, attempts: 3);
 
         return response()->json(['status' => 'revoked']);
@@ -165,7 +170,7 @@ final class OrganizationUserController
             abort_if($account === null, 404);
             if (! $mainPortal) {
                 abort_if(DB::table('customer_permissions')->where('user_id', $account->id)
-                    ->where('action', OrganizationOnboardingAccess::PERMISSION)->exists(), 403);
+                    ->whereIn('action', [OrganizationOnboardingAccess::PERMISSION, OrganizationOnboardingAccess::RECOVERY])->exists(), 403);
             }
             $setup = DB::table('organization_user_setups')->where('user_id', $account->id);
             $previous = $setup->first();

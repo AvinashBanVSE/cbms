@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { OrganizationDelegations } from "./OrganizationDelegations";
+import { AccountRecovery } from "./AccountRecovery";
 import { OrganizationAccountLifecycle } from "./OrganizationAccountLifecycle";
 import { OrganizationRoles } from "./OrganizationRoles";
 import { portalRequest } from "./api";
@@ -199,7 +200,12 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
         : policy || provider
           ? { mode: String(fields.get("mode")) }
           : reissue || revoke
-            ? { code: String(fields.get("code")) }
+            ? {
+                code: String(fields.get("code")),
+                ...(revoke && fields.get("permission")
+                  ? { permission: String(fields.get("permission")) }
+                  : {}),
+              }
             : {
                 email: String(fields.get("email")),
                 business_id: String(fields.get("business_id")),
@@ -209,7 +215,11 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
       if (provider) {
         setNotice("Service provider default saved.");
       } else if (revoke) {
-        setNotice("Organization onboarding permission revoked.");
+        setNotice(
+          fields.get("permission")
+            ? "Organization recovery permission revoked."
+            : "Organization onboarding permission revoked.",
+        );
       } else if (policy || lookup) {
         const effective =
           result.mode && result.source
@@ -316,7 +326,7 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
             <input name="business_id" required />
           </label>
           <fieldset>
-            <legend>Allowed mapping actions</legend>
+            <legend>Allowed actions</legend>
             {actions.map(([value, label]) => (
               <label key={value}>
                 <input name="actions" type="checkbox" value={value} />
@@ -324,14 +334,24 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
               </label>
             ))}
             {!tenantId && (
-              <label>
-                <input
-                  name="actions"
-                  type="checkbox"
-                  value="organization_users.provision"
-                />
-                Provision users in this Organization
-              </label>
+              <>
+                <label>
+                  <input
+                    name="actions"
+                    type="checkbox"
+                    value="organization_users.provision"
+                  />
+                  Provision users in this Organization
+                </label>
+                <label>
+                  <input
+                    name="actions"
+                    type="checkbox"
+                    value="organization_users.recover"
+                  />
+                  Recover staff accounts in this Organization
+                </label>
+              </>
             )}
           </fieldset>
           <button disabled={busy}>Create user</button>
@@ -356,7 +376,9 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
       {!tenantId && (
         <>
           <details>
-            <summary>Revoke Organization onboarding permission</summary>
+            <summary>
+              Revoke Organization account administration permission
+            </summary>
             <form data-operation="revoke-onboarding" onSubmit={submit}>
               <label>
                 Organization Tenant ID
@@ -366,9 +388,19 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
                 User Code
                 <input name="code" pattern="[A-Z]{2}[0-9]{4}" required />
               </label>
-              <button disabled={busy}>Revoke onboarding permission</button>
+              <label>
+                Permission
+                <select name="permission">
+                  <option value="">Onboarding</option>
+                  <option value="organization_users.recover">
+                    Account recovery
+                  </option>
+                </select>
+              </label>
+              <button disabled={busy}>Revoke permission</button>
             </form>
           </details>
+          <AccountRecovery />
           <OrganizationAccess />
           <OrganizationAccountLifecycle />
           <OrganizationDelegations />

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\ProviderAccess;
+use App\Http\Controllers\AccountRecoveryController;
 use App\Http\Controllers\AuditTrailController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\WorkspaceAccessController;
 use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('api/v1')->group(function (): void {
@@ -37,6 +39,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('providers/{provider}/users/reissue', [ProviderUserController::class, 'reissue'])->whereUuid('provider')
         ->middleware('throttle:5,1,provider-setup-reissue');
     Route::post('providers/{provider}/users/revoke', [ProviderUserController::class, 'revoke'])->whereUuid('provider');
+    Route::post('providers/{provider}/users/recover', [AccountRecoveryController::class, 'provider'])->whereUuid('provider')
+        ->middleware('throttle:10,1,provider-password-recovery');
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
@@ -44,12 +48,18 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('login', function (Request $request) {
             $credentials = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email', 'password' => 'required|string']);
             $version = null;
-            abort_unless(Auth::attemptWhen($credentials, static function ($user) use (&$version): bool {
-                $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
-                $version = $account === null ? null : (int) $account->session_version;
+            $authenticated = DB::transaction(static function () use ($credentials, &$version): bool {
+                // Serialize password checking and Laravel's optional rehash with credential changes.
+                DB::table('users')->where('code', $credentials['code'])->lockForUpdate()->first(['id']);
 
-                return $account === null || $account->state === 'Active';
-            }), 401);
+                return Auth::attemptWhen($credentials, static function ($user) use (&$version): bool {
+                    $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
+                    $version = $account === null ? null : (int) $account->session_version;
+
+                    return $account === null || $account->state === 'Active';
+                });
+            });
+            abort_unless($authenticated, 401);
             $request->session()->regenerate();
             $request->session()->put(ValidateOrganizationSession::VERSION, $version);
 
@@ -85,6 +95,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('tenants/{tenant}/organization-users', [OrganizationUserController::class, 'store'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/organization-users/reissue', [OrganizationUserController::class, 'reissue'])->whereUuid('tenant')->middleware('throttle:5,1,organization-reissue');
     Route::post('tenants/{tenant}/organization-users/revoke-onboarding', [OrganizationUserController::class, 'revokeOnboarding'])->whereUuid('tenant');
+    Route::post('tenants/{tenant}/organization-users/recover', [AccountRecoveryController::class, 'organization'])->whereUuid('tenant')
+        ->middleware('throttle:10,1,organization-password-recovery');
     Route::post('organization-setup/verify', [OrganizationCredentialController::class, 'verify'])->middleware('throttle:organization-verify');
     Route::post('organization-setup/complete', [OrganizationCredentialController::class, 'complete'])->middleware('throttle:5,1,organization-complete');
     Route::get('mapping-contexts', fn (CustomerBusinessAccess $access) => response()->json($access->mappingContexts())->header('Cache-Control', 'no-store'));

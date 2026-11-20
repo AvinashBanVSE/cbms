@@ -6,6 +6,7 @@ import "./portal.css";
 import { type ActiveAccessDelegation } from "./OrganizationDelegations";
 import { OrganizationAccess, OrganizationUsers } from "./OrganizationUsers";
 import { OrganizationAccountSetup } from "./OrganizationAccountSetup";
+import { AccountRecovery } from "./AccountRecovery";
 import { ProviderAccounts } from "./ProviderAccounts";
 import { ProviderDirectory } from "./ProviderDirectory";
 import { BusinessDirectory } from "./BusinessDirectory";
@@ -53,6 +54,7 @@ interface WorkspaceAccess {
   mapping_contexts: MappingContext[];
   delegations: ActiveAccessDelegation[];
   organization_onboarding?: { tenant_id: string; professional_name: string };
+  organization_recovery?: { tenant_id: string; professional_name: string };
   provider_directory?: { id: string; professional_name: string };
 }
 
@@ -256,6 +258,17 @@ export function Portal() {
                 <ProviderDirectory />
               </section>
             )}
+            {workspace.organization_recovery && (
+              <section aria-label="Organization account recovery">
+                <h2>
+                  {workspace.organization_recovery.professional_name} · Account
+                  recovery
+                </h2>
+                <AccountRecovery
+                  tenantId={workspace.organization_recovery.tenant_id}
+                />
+              </section>
+            )}
             {workspace.organization_onboarding && (
               <section aria-label="Organization onboarding">
                 <h2>
@@ -304,6 +317,7 @@ export function Portal() {
               !mappingContexts.length &&
               !delegations.length &&
               !workspace.organization_onboarding &&
+              !workspace.organization_recovery &&
               !workspace.provider_directory && (
                 <p>No workspace is assigned to this account.</p>
               )}

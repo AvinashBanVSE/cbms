@@ -12,19 +12,21 @@ final class OrganizationOnboardingAccess
 {
     public const PERMISSION = 'organization_users.provision';
 
+    public const RECOVERY = 'organization_users.recover';
+
     public function __construct(private readonly MainPortalAccess $portal) {}
 
     /**
      * Returns whether the caller is acting under Main Portal authority.
      */
-    public function requireFor(string $tenant, bool $lock = false): bool
+    public function requireFor(string $tenant, bool $lock = false, string $permission = self::PERMISSION): bool
     {
         $user = Auth::id();
         abort_if($user === null, 401);
         if ($this->portal->allows((string) $user, 'organization_users.manage')) {
             return true;
         }
-        $authorized = $this->assignments((string) $user)->where('tenant.id', $tenant);
+        $authorized = $this->assignments((string) $user, $permission)->where('tenant.id', $tenant);
         if ($lock) {
             $authorized->lockForUpdate();
         }
@@ -33,12 +35,12 @@ final class OrganizationOnboardingAccess
         return false;
     }
 
-    public function contextFor(string $user): ?object
+    public function contextFor(string $user, string $permission = self::PERMISSION): ?object
     {
-        return $this->assignments($user)->first(['tenant.id as tenant_id', 'organization.professional_name']);
+        return $this->assignments($user, $permission)->first(['tenant.id as tenant_id', 'organization.professional_name']);
     }
 
-    private function assignments(string $user): Builder
+    private function assignments(string $user, string $permission): Builder
     {
         return DB::table('customer_accounts as account')
             ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
@@ -48,9 +50,9 @@ final class OrganizationOnboardingAccess
                     ->where('association.active', true);
             })->join('customer_business_scopes as scope', function ($join): void {
                 $join->on('scope.user_id', '=', 'account.user_id')->on('scope.business_id', '=', 'organization.id');
-            })->join('customer_permissions as permission', function ($join): void {
+            })->join('customer_permissions as permission', function ($join) use ($permission): void {
                 $join->on('permission.user_id', '=', 'account.user_id')->on('permission.business_id', '=', 'organization.id')
-                    ->where('permission.action', self::PERMISSION);
+                    ->where('permission.action', $permission);
             })
             ->where('account.user_id', $user)->where('account.state', 'Active')
             ->where('organization.kind', 'Organization')->where('organization.operational_state', 'Active');

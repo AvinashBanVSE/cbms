@@ -53,6 +53,11 @@ final class OrganizationAccountLifecycleController
             DB::table('customer_accounts')->where('user_id', $id)->update([
                 'state' => $next, 'session_version' => (int) $account->session_version + 1,
             ]);
+            if (in_array($next, ['Suspended', 'Deactivated'], true)) {
+                DB::table('organization_user_setups')->where(['user_id' => $id, 'purpose' => 'recovery'])->update([
+                    'temporary_hash' => null, 'temporary_expires_at' => null, 'session_digest' => null, 'session_expires_at' => null,
+                ]);
+            }
             if ($next === 'Terminated') {
                 DB::table('users')->where('id', $id)->update(['password' => Hash::make(Str::random(64))]);
                 DB::table('organization_user_setups')->where('user_id', $id)->delete();
