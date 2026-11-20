@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CommercialWorkspace } from "./CommercialWorkspace";
 import { AuditTrail } from "./AuditTrail";
 import { AuthenticatorSettings } from "./AuthenticatorSettings";
+import { BusinessTimePresentation } from "./BusinessTimePresentation";
 import { GlobalBusinessSettings } from "./GlobalBusinessSettings";
 import { LegalIdentities } from "./LegalIdentities";
 import { portalRequest, PortalRequestError } from "./api";
@@ -60,6 +61,7 @@ interface WorkspaceAccess {
   delegations: ActiveAccessDelegation[];
   organization_onboarding?: { tenant_id: string; professional_name: string };
   organization_recovery?: { tenant_id: string; professional_name: string };
+  organization_time_presentation?: { id: string; professional_name: string };
   provider_directory?: { id: string; professional_name: string };
 }
 
@@ -278,6 +280,15 @@ export function Portal() {
                 <ProviderDirectory />
               </section>
             )}
+            {workspace.organization_time_presentation && (
+              <section aria-label="Organization business settings">
+                <h2>
+                  {workspace.organization_time_presentation.professional_name} ·
+                  Business settings
+                </h2>
+                <BusinessTimePresentation organization />
+              </section>
+            )}
             {workspace.organization_recovery && (
               <section aria-label="Organization account recovery">
                 <h2>
@@ -342,6 +353,7 @@ export function Portal() {
               !delegations.length &&
               !workspace.organization_onboarding &&
               !workspace.organization_recovery &&
+              !workspace.organization_time_presentation &&
               !workspace.provider_directory && (
                 <p>No workspace is assigned to this account.</p>
               )}

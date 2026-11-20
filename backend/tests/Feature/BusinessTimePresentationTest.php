@@ -64,6 +64,63 @@ final class BusinessTimePresentationTest extends TestCase
         $this->assertSame(6, DB::table('portal_events')->where('action', 'global_business_settings.time_presentation_changed')->count());
     }
 
+    public function test_delegated_editor_can_change_only_the_authorized_organization_clock(): void
+    {
+        $portal = $this->business('Main Portal');
+        $organization = $this->business('Organization');
+        $other = $this->business('Organization');
+        $shop = $this->business('Shop', $organization);
+        $tenant = Str::uuid7()->toString();
+        $mainUser = Str::uuid7()->toString();
+        $editor = Str::uuid7()->toString();
+        DB::table('business_identities')->where('id', $organization)->update(['operational_state' => 'Active']);
+        DB::table('portal_installation')->where('id', 1)->update(['stage' => 'ready', 'portal_id' => $portal]);
+        DB::table('customer_tenants')->insert(['id' => $tenant, 'organization_id' => $organization, 'provider_id' => $portal]);
+        foreach ([$mainUser => 'AA8882', $editor => 'AA8883'] as $id => $code) {
+            DB::table('users')->insert(['id' => $id, 'email' => $code.'@example.test', 'code' => $code, 'password' => 'unused']);
+        }
+        DB::table('portal_grants')->insert(['user_id' => $mainUser, 'business_id' => $portal, 'permission' => 'global_business_settings.manage']);
+        DB::table('customer_accounts')->insert(['user_id' => $editor, 'tenant_id' => $tenant, 'state' => 'Active']);
+        $binding = ['user_id' => $editor, 'business_id' => $organization];
+        DB::table('customer_business_associations')->insert([...$binding, 'active' => true]);
+        $base = '/api/v1/global-business-settings/time-presentation';
+        $settings = '/api/v1/organization-time-presentation';
+        $access = $base.'/'.$organization.'/access';
+        $grant = ['code' => 'AA8883', 'enabled' => true];
+        $clock = ['clock' => '12-hour', 'expected_version' => 1];
+
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson($settings)->assertForbidden();
+        $this->postJson($access, $grant)->assertForbidden();
+        $this->actingAs(User::findOrFail($mainUser));
+        $this->postJson($base.'/'.$other.'/access', $grant)->assertNotFound();
+        $this->postJson($access, $grant)->assertOk()->assertJsonPath('enabled', true);
+        $this->postJson($base.'/'.$organization, [
+            'clock' => null, 'override_allowed' => true, 'locked' => false, 'expected_version' => 0,
+        ])->assertOk();
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson($settings)->assertForbidden();
+        DB::table('customer_business_scopes')->insert($binding);
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('organization_time_presentation.id', $organization);
+        $this->getJson($settings)->assertOk()->assertJsonPath('business_id', $organization)->assertJsonPath('can_manage', true);
+        $this->getJson($base.'/'.$other)->assertForbidden();
+        $this->postJson($settings, [...$clock, 'locked' => true])->assertUnprocessable();
+        $this->postJson($settings, $clock)->assertOk()->assertJsonPath('local.version', 2);
+        $this->assertDatabaseMissing('business_time_presentation', ['business_id' => $other]);
+        $this->assertDatabaseMissing('business_time_presentation', ['business_id' => $shop]);
+        $this->assertDatabaseHas('portal_events', ['action' => 'global_business_settings.time_presentation_changed', 'actor_id' => $editor, 'subject_id' => $organization]);
+
+        $this->actingAs(User::findOrFail($mainUser));
+        $this->postJson($base, ['clock' => '24-hour', 'override_allowed' => false, 'locked' => true, 'expected_version' => 0])->assertOk();
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson($settings)->assertOk()->assertJsonPath('can_manage', false)->assertJsonPath('effective.clock', '24-hour');
+        $this->postJson($settings, [...$clock, 'expected_version' => 2])->assertForbidden();
+        $this->actingAs(User::findOrFail($mainUser));
+        $this->postJson($access, [...$grant, 'enabled' => false])->assertOk()->assertJsonPath('enabled', false);
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson($settings)->assertForbidden();
+    }
+
     private function business(string $kind, ?string $parent = null): string
     {
         $id = Str::uuid7()->toString();

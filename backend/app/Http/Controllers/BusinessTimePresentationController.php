@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Authorization\OrganizationTimePresentationAccess;
 use App\Configuration\BusinessTimePresentation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ final class BusinessTimePresentationController
 {
     public function __construct(
         private readonly MainPortalAccess $access,
+        private readonly OrganizationTimePresentationAccess $organizations,
         private readonly BusinessTimePresentation $settings,
     ) {}
 
@@ -54,25 +56,101 @@ final class BusinessTimePresentationController
                 throw ValidationException::withMessages(['clock' => 'This context must inherit the governing value.']);
             }
             $next = ['clock' => $input['clock'], 'override_allowed' => $override, 'locked' => $locked];
-            if ($next === array_intersect_key($current['local'], $next)) {
-                return $current;
-            }
-            $version = $current['local']['version'] + 1;
-            DB::table('business_time_presentation')->upsert(
-                ['business_id' => $target, ...$next, 'version' => $version],
-                ['business_id'],
-                ['clock', 'override_allowed', 'locked', 'version'],
-            );
-            DB::table('portal_events')->insert([
-                'id' => Str::uuid7()->toString(), 'action' => 'global_business_settings.time_presentation_changed',
-                'actor_id' => Auth::id(), 'subject_id' => $target, 'recorded_at' => now(),
-                'details' => json_encode(['before' => $current['local'], 'after' => [...$next, 'version' => $version]], JSON_THROW_ON_ERROR),
-            ]);
 
-            return $this->settings->resolve($portal, $target);
+            return $this->persist($portal, $current, $next);
         }, attempts: 3);
 
         return $this->response($result);
+    }
+
+    public function showOrganization(): JsonResponse
+    {
+        $business = $this->organizations->requireOrganization();
+        $portal = DB::table('portal_installation')->where('id', 1)->value('portal_id');
+
+        return $this->organizationResponse($this->settings->resolve($portal, $business));
+    }
+
+    public function updateOrganization(Request $request): JsonResponse
+    {
+        $this->organizations->requireOrganization();
+        $input = $request->validate([
+            'clock' => ['present', 'nullable', Rule::in(BusinessTimePresentation::CLOCKS)],
+            'expected_version' => 'required|integer|min:0',
+            'override_allowed' => 'prohibited',
+            'locked' => 'prohibited',
+        ]);
+        $result = DB::transaction(function () use ($input): array {
+            $portal = DB::table('portal_installation')->where('id', 1)->lockForUpdate()->value('portal_id');
+            $business = $this->organizations->requireOrganization(lock: true);
+            $current = $this->settings->resolve($portal, $business);
+            abort_unless($current['local']['override_allowed'] && $current['upstream_lock'] === null, 403, 'This Organization must inherit the governing value.');
+            abort_if($current['local']['version'] !== (int) $input['expected_version'], 409, 'Reload the current settings before saving.');
+
+            return $this->persist($portal, $current, [
+                'clock' => $input['clock'], 'override_allowed' => true, 'locked' => $current['local']['locked'],
+            ]);
+        }, attempts: 3);
+
+        return $this->organizationResponse($result);
+    }
+
+    public function setOrganizationAccess(Request $request, string $business): JsonResponse
+    {
+        $this->access->requirePermission('global_business_settings.manage');
+        $input = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/D', 'enabled' => 'required|boolean']);
+        $enabled = (bool) $input['enabled'];
+        DB::transaction(function () use ($business, $input, $enabled): void {
+            DB::table('portal_installation')->where('id', 1)->lockForUpdate()->first(['id']);
+            $this->access->requirePermission('global_business_settings.manage');
+            $account = DB::table('customer_accounts as account')
+                ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
+                ->join('users', 'users.id', '=', 'account.user_id')
+                ->join('business_identities as organization', 'organization.id', '=', 'tenant.organization_id')
+                ->where(['organization.id' => $business, 'organization.kind' => 'Organization', 'users.code' => $input['code']])
+                ->lockForUpdate()->first(['account.user_id']);
+            abort_if($account === null, 404);
+            $binding = ['user_id' => $account->user_id, 'business_id' => $business, 'action' => OrganizationTimePresentationAccess::PERMISSION];
+            $grants = DB::table('customer_permissions');
+            $changed = $enabled ? $grants->insertOrIgnore($binding) : $grants->where($binding)->delete();
+            if ($changed > 0) {
+                DB::table('portal_events')->insert([
+                    'id' => Str::uuid7()->toString(), 'action' => 'global_business_settings.organization_access_changed',
+                    'actor_id' => Auth::id(), 'subject_id' => $business, 'recorded_at' => now(),
+                    'details' => json_encode(['user_id' => $account->user_id, 'enabled' => $enabled], JSON_THROW_ON_ERROR),
+                ]);
+            }
+        }, attempts: 3);
+
+        return response()->json(['enabled' => $enabled]);
+    }
+
+    private function persist(string $portal, array $current, array $next): array
+    {
+        if ($next === array_intersect_key($current['local'], $next)) {
+            return $current;
+        }
+        $target = $current['business_id'];
+        $version = $current['local']['version'] + 1;
+        DB::table('business_time_presentation')->upsert(
+            ['business_id' => $target, ...$next, 'version' => $version],
+            ['business_id'],
+            ['clock', 'override_allowed', 'locked', 'version'],
+        );
+        DB::table('portal_events')->insert([
+            'id' => Str::uuid7()->toString(), 'action' => 'global_business_settings.time_presentation_changed',
+            'actor_id' => Auth::id(), 'subject_id' => $target, 'recorded_at' => now(),
+            'details' => json_encode(['before' => $current['local'], 'after' => [...$next, 'version' => $version]], JSON_THROW_ON_ERROR),
+        ]);
+
+        return $this->settings->resolve($portal, $target);
+    }
+
+    private function organizationResponse(array $result): JsonResponse
+    {
+        $result['can_manage'] = $result['local']['override_allowed'] && $result['upstream_lock'] === null;
+
+        return response()->json($result)->header('Cache-Control', 'no-store');
     }
 
     private function response(array $result): JsonResponse

@@ -8,6 +8,7 @@ use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\OrganizationAccessDelegation;
 use App\Authorization\OrganizationOnboardingAccess;
+use App\Authorization\OrganizationTimePresentationAccess;
 use App\Authorization\PermissionCatalogue;
 use App\Authorization\ProviderAccess;
 use Illuminate\Http\JsonResponse;
@@ -21,6 +22,7 @@ final class WorkspaceAccessController
         OrganizationAccessDelegation $delegation,
         OrganizationOnboardingAccess $onboarding,
         ProviderAccess $providers,
+        OrganizationTimePresentationAccess $timePresentation,
     ): JsonResponse {
         $user = Auth::id();
         abort_if($user === null, 401);
@@ -31,6 +33,7 @@ final class WorkspaceAccessController
         $organization = $onboarding->contextFor((string) $user);
         $recovery = $onboarding->contextFor((string) $user, OrganizationOnboardingAccess::RECOVERY);
         $provider = $providers->directoryFor((string) $user);
+        $timeSettings = $timePresentation->contextFor((string) $user);
 
         return response()->json([
             'administration' => $workspaces,
@@ -38,6 +41,7 @@ final class WorkspaceAccessController
             'delegations' => $delegation->summariesFor((string) $user),
             ...($organization === null ? [] : ['organization_onboarding' => $organization]),
             ...($recovery === null ? [] : ['organization_recovery' => $recovery]),
+            ...($timeSettings === null ? [] : ['organization_time_presentation' => $timeSettings]),
             ...($provider === null ? [] : ['provider_directory' => $provider]),
         ])->header('Cache-Control', 'no-store');
     }

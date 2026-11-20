@@ -5,6 +5,9 @@ interface Service {
   id: string;
   name: string;
   purpose: string;
+  scopes?: string;
+  effective_scopes?: string[];
+  scope_source?: "service" | "capability";
 }
 interface Page {
   data: Service[];
@@ -71,9 +74,13 @@ export function ServiceRegistry({
     const capability = form.dataset.kind === "capability";
     setSaving(true);
     try {
-      if (capability)
-        await portalRequest("services/" + selected + "/capabilities", base);
-      else
+      if (capability) {
+        const scopes = values.getAll("capability_scopes").map(String);
+        await portalRequest("services/" + selected + "/capabilities", {
+          ...base,
+          ...(scopes.length ? { scopes } : {}),
+        });
+      } else
         await portalRequest("services", {
           ...base,
           category: String(values.get("category")),
@@ -88,6 +95,13 @@ export function ServiceRegistry({
       setSaving(false);
     }
   }
+
+  const selectedService = result?.data.find(
+    (service) => service.id === selected,
+  );
+  const allowedScopes: string[] = selectedService?.scopes
+    ? JSON.parse(selectedService.scopes)
+    : [];
 
   return (
     <>
@@ -179,6 +193,12 @@ export function ServiceRegistry({
               {capabilities.data.map((item) => (
                 <li key={item.id}>
                   <strong>{item.name}</strong> {item.purpose}
+                  {item.effective_scopes && (
+                    <p>
+                      Effective scopes: {item.effective_scopes.join(", ")}
+                      {item.scope_source === "service" && " (inherited)"}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>
@@ -199,10 +219,7 @@ export function ServiceRegistry({
       )}
       {selected && (
         <form key={selected} data-kind="capability" onSubmit={save}>
-          <h2>
-            Register capability for{" "}
-            {result?.data.find((service) => service.id === selected)?.name}
-          </h2>
+          <h2>Register capability for {selectedService?.name}</h2>
           <label>
             Capability name
             <input name="name" maxLength={100} required />
@@ -211,6 +228,25 @@ export function ServiceRegistry({
             Purpose
             <textarea name="purpose" maxLength={4000} required />
           </label>
+          {allowedScopes.length > 0 && (
+            <label>
+              Capability scopes
+              <select
+                multiple
+                name="capability_scopes"
+                aria-describedby="capability-scope-help"
+              >
+                {allowedScopes.map((scope) => (
+                  <option key={scope} value={scope}>
+                    {scope}
+                  </option>
+                ))}
+              </select>
+              <span id="capability-scope-help">
+                Leave empty to inherit the service scopes.
+              </span>
+            </label>
+          )}
           <button disabled={saving}>Register capability</button>
         </form>
       )}

@@ -45,19 +45,44 @@ final class ServiceRegistryController
     public function capabilities(string $service): JsonResponse
     {
         $this->access->requirePermission('service_catalogue.view');
-        abort_unless(DB::table('platform_services')->where('id', $service)->exists(), 404);
+        $scopes = $this->serviceScopes($service);
+        $capabilities = DB::table('service_capabilities')->where('service_id', $service)
+            ->orderBy('name')->orderBy('id')->simplePaginate(30)
+            ->through(static function (object $capability) use ($scopes): object {
+                $declared = $capability->scopes === null ? null : json_decode($capability->scopes, true, flags: JSON_THROW_ON_ERROR);
+                $capability->effective_scopes = $declared === null ? $scopes : array_values(array_intersect($declared, $scopes));
+                $capability->scope_source = $declared === null ? 'service' : 'capability';
 
-        return response()->json(DB::table('service_capabilities')->where('service_id', $service)
-            ->orderBy('name')->orderBy('id')->simplePaginate(30))->header('Cache-Control', 'no-store');
+                return $capability;
+            });
+
+        return response()->json($capabilities)->header('Cache-Control', 'no-store');
     }
 
     public function createCapability(Request $request, string $service): JsonResponse
     {
         $this->access->requirePermission('service_catalogue.create');
-        abort_unless(DB::table('platform_services')->where('id', $service)->exists(), 404);
-        $data = $request->validate(['name' => 'required|string|max:100', 'purpose' => 'required|string|max:4000']);
+        $scopes = $this->serviceScopes($service);
+        $data = $request->validate([
+            'name' => 'required|string|max:100',
+            'purpose' => 'required|string|max:4000',
+            'scopes' => 'sometimes|array|list|min:1|max:4',
+            'scopes.*' => ['required', 'string', 'distinct', Rule::in($scopes)],
+        ]);
+        if (isset($data['scopes'])) {
+            $data['scopes'] = json_encode($data['scopes'], JSON_THROW_ON_ERROR);
+        }
 
         return $this->create('service_capabilities', [...$data, 'service_id' => $service], 'capability.created');
+    }
+
+    /** @return list<string> */
+    private function serviceScopes(string $service): array
+    {
+        $scopes = DB::table('platform_services')->where('id', $service)->value('scopes');
+        abort_if($scopes === null, 404);
+
+        return json_decode($scopes, true, flags: JSON_THROW_ON_ERROR);
     }
 
     private function create(string $table, array $record, string $action): JsonResponse

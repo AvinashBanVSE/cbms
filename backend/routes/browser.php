@@ -63,6 +63,9 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('global-business-settings', GlobalBusinessSettingsController::class);
     Route::get('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'show'])->whereUuid('business');
     Route::post('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'update'])->whereUuid('business');
+    Route::post('global-business-settings/time-presentation/{business}/access', [BusinessTimePresentationController::class, 'setOrganizationAccess'])->whereUuid('business');
+    Route::get('organization-time-presentation', [BusinessTimePresentationController::class, 'showOrganization']);
+    Route::post('organization-time-presentation', [BusinessTimePresentationController::class, 'updateOrganization']);
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');

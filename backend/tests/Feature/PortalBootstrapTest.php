@@ -65,13 +65,21 @@ final class PortalBootstrapTest extends TestCase
             'platform_defaults' => ['language' => 'en', 'financial_year_start' => '04-01', 'financial_year_end' => '03-31'],
         ]);
         $this->postJson('/api/v1/global-business-settings', ['currency' => 'USD'])->assertMethodNotAllowed();
-        $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped']];
+        $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped', 'Business-context-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');
         $this->getJson('/api/v1/services')->assertOk()->assertJsonPath('data.0.id', $id);
         $this->postJson('/api/v1/services', $service)->assertConflict();
-        $this->postJson("/api/v1/services/{$id}/capabilities", ['name' => 'Email', 'purpose' => 'Deliver email'])->assertCreated();
-        $this->getJson("/api/v1/services/{$id}/capabilities")->assertOk()->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.name', 'Email');
+        $capabilities = "/api/v1/services/{$id}/capabilities";
+        $this->postJson($capabilities, ['name' => 'Email', 'purpose' => 'Deliver email'])->assertCreated();
+        $restricted = ['name' => 'Restricted delivery', 'purpose' => 'Deliver within the business'];
+        $this->postJson($capabilities, [...$restricted, 'scopes' => ['Ecosystem-wide']])
+            ->assertUnprocessable()->assertJsonValidationErrors('scopes.0');
+        $this->postJson($capabilities, [...$restricted, 'scopes' => ['Business-context-scoped']])->assertCreated();
+        $this->getJson($capabilities)->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.name', 'Email')->assertJsonPath('data.0.scope_source', 'service')
+            ->assertJsonPath('data.0.effective_scopes', ['Tenant-scoped', 'Business-context-scoped'])
+            ->assertJsonPath('data.1.name', 'Restricted delivery')->assertJsonPath('data.1.scope_source', 'capability')
+            ->assertJsonPath('data.1.effective_scopes', ['Business-context-scoped']);
         $this->getJson('/api/v1/services/018f0000-0000-7000-8000-000000000000/capabilities')->assertNotFound();
         $other = $this->postJson('/api/v1/services', [...$service, 'name' => 'Other'])->assertCreated()->json('id');
         $this->getJson("/api/v1/services/{$other}/capabilities")->assertOk()->assertJsonCount(0, 'data');

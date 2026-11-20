@@ -55,6 +55,10 @@ it("shows the Indian platform settings and manages the clock format", async () =
     if (path === "installation") return json({ stage: "ready" });
     if (path === "workspace-access")
       return json({ ...adminWorkspace, administration: ["business_settings"] });
+    if (path.endsWith("/other-organization/access")) {
+      expect(body).toEqual({ code: "AA7788", enabled: true });
+      return json({ enabled: true });
+    }
     if (path.endsWith("/locked-shop")) {
       return json({
         business_id: "locked-shop",
@@ -172,10 +176,66 @@ it("shows the Indian platform settings and manages the clock format", async () =
     settings.querySelector<HTMLInputElement>('[name="override_allowed"]')
       ?.checked,
   ).toBe(true);
+  const access = 'form[data-operation="time-presentation-access"]';
+  document.querySelector<HTMLInputElement>(access + ' [name="code"]')!.value =
+    "AA7788";
+  await submit(access);
+  expect(settings.textContent).toContain(
+    "Organization settings access updated.",
+  );
   input("business", "missing-business");
   await submit(load);
   expect(settings.textContent).toContain("Business unavailable.");
   expect(settings.querySelector(editor)).toBeNull();
+});
+
+it("edits the clock in the Organization workspace without governance controls", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({
+        administration: [],
+        mapping_contexts: [],
+        delegations: [],
+        organization_time_presentation: {
+          id: "organization-1",
+          professional_name: "West Region",
+        },
+      });
+    if (path === "organization-time-presentation") {
+      if (body) expect(body).toEqual({ clock: "24-hour", expected_version: 1 });
+      const clock = body ? "24-hour" : "12-hour";
+      return json({
+        business_id: "organization-1",
+        scope: "organization",
+        effective: { clock, source: "organization" },
+        upstream_lock: null,
+        local: {
+          clock,
+          override_allowed: true,
+          locked: false,
+          version: body ? 2 : 1,
+        },
+        can_manage: true,
+      });
+    }
+    throw new Error(path);
+  });
+  await render();
+  const workspace = document.querySelector(
+    '[aria-label="Organization business settings"]',
+  )!;
+  expect(workspace.textContent).toContain("West Region");
+  expect(workspace.querySelector('[name="business"]')).toBeNull();
+  await submit('form[data-operation="load-time-presentation"]');
+  const editor = 'form[data-operation="save-time-presentation"]';
+  expect(workspace.querySelector('[name="override_allowed"]')).toBeNull();
+  expect(workspace.querySelector('[name="locked"]')).toBeNull();
+  document.querySelector<HTMLSelectElement>(
+    editor + ' select[name="clock"]',
+  )!.value = "24-hour";
+  await submit(editor);
+  expect(workspace.textContent).toContain("Effective clock: 24-hour");
 });
 
 it("reports a rejected settings request when the read grant is revoked", async () => {
@@ -285,12 +345,21 @@ it("configures the portal, creates its owner, signs in, manages a service and si
         return json({ id: "first" });
       case "services/first/capabilities":
         expect(body?.name).toBe("Email");
+        expect(body?.scopes).toEqual(["Tenant-scoped"]);
         capabilitySaved = true;
         return json({ id: "child" });
       case "services/first/capabilities?page=1":
         return json({
           data: capabilitySaved
-            ? [{ id: "child", name: "Email", purpose: "Deliver email" }]
+            ? [
+                {
+                  id: "child",
+                  name: "Email",
+                  purpose: "Deliver email",
+                  effective_scopes: ["Tenant-scoped"],
+                  scope_source: "capability",
+                },
+              ]
             : [],
           next_page_url: capabilitySaved ? "/next" : null,
         });
@@ -302,7 +371,14 @@ it("configures the portal, creates its owner, signs in, manages a service and si
         return json({
           data:
             saved && page === 1
-              ? [{ id: "first", name: "Messaging", purpose: "Delivery" }]
+              ? [
+                  {
+                    id: "first",
+                    name: "Messaging",
+                    purpose: "Delivery",
+                    scopes: '["Tenant-scoped","Business-context-scoped"]',
+                  },
+                ]
               : [],
           next_page_url: page === 1 ? "/next" : null,
         });
@@ -349,11 +425,13 @@ it("configures the portal, creates its owner, signs in, manages a service and si
     'form[data-kind="capability"]',
   )!;
   form.querySelector<HTMLInputElement>('[name="name"]')!.value = "Email";
+  form.querySelector<HTMLSelectElement>('[name="capability_scopes"]')!.value =
+    "Tenant-scoped";
   await submit('form[data-kind="capability"]');
   expect(
     document.querySelector('[aria-label="Registered capabilities"]')
       ?.textContent,
-  ).toContain("Email");
+  ).toContain("Effective scopes: Tenant-scoped");
   await click("Next capabilities");
   expect(document.body.textContent).toContain(
     "No capabilities registered for this service.",

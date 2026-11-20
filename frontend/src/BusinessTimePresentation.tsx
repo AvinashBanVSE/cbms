@@ -24,7 +24,13 @@ const sourceNames: Record<string, string> = {
 
 const endpoint = "global-business-settings/time-presentation";
 
-export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
+export function BusinessTimePresentation({
+  timeZone = "Asia/Kolkata",
+  organization = false,
+}: {
+  timeZone?: string;
+  organization?: boolean;
+}) {
   const [settings, setSettings] = useState<ClockSettings>();
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,8 +54,9 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
 
   function load(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const id = String(new FormData(event.currentTarget).get("business")).trim();
     setSettings(undefined);
+    if (organization) return send("organization-time-presentation");
+    const id = String(new FormData(event.currentTarget).get("business")).trim();
     return send(id ? endpoint + "/" + encodeURIComponent(id) : endpoint);
   }
 
@@ -57,12 +64,38 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
     event.preventDefault();
     if (!settings) return;
     const fields = new FormData(event.currentTarget);
-    return send(endpoint + "/" + encodeURIComponent(settings.business_id), {
+    const values = {
       clock: String(fields.get("clock") ?? "") || null,
+      expected_version: settings.local.version,
+    };
+    if (organization) return send("organization-time-presentation", values);
+    return send(endpoint + "/" + encodeURIComponent(settings.business_id), {
+      ...values,
       override_allowed: fields.has("override_allowed"),
       locked: fields.has("locked"),
-      expected_version: settings.local.version,
     });
+  }
+
+  async function governAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!settings) return;
+    const fields = new FormData(event.currentTarget);
+    setBusy(true);
+    setNotice("");
+    try {
+      await portalRequest(
+        endpoint + "/" + encodeURIComponent(settings.business_id) + "/access",
+        {
+          code: String(fields.get("code")).trim(),
+          enabled: fields.get("access") === "grant",
+        },
+      );
+      setNotice("Organization settings access updated.");
+    } catch (error) {
+      setNotice((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const clock = settings?.effective.clock;
@@ -76,11 +109,15 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
     <details>
       <summary>Business time display</summary>
       <form data-operation="load-time-presentation" onSubmit={load}>
-        <label>
-          Business ID
-          <input name="business" />
-        </label>
-        <p>Leave blank for Main Portal settings.</p>
+        {!organization && (
+          <>
+            <label>
+              Business ID
+              <input name="business" />
+            </label>
+            <p>Leave blank for Main Portal settings.</p>
+          </>
+        )}
         <button disabled={busy}>Load time display settings</button>
       </form>
       {settings && (
@@ -108,7 +145,7 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
                   <option value="24-hour">24-hour</option>
                 </select>
               </label>
-              {settings.scope !== "platform" && (
+              {!organization && settings.scope !== "platform" && (
                 <label>
                   <input
                     type="checkbox"
@@ -118,7 +155,7 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
                   Allow a local override
                 </label>
               )}
-              {settings.scope !== "business" && (
+              {!organization && settings.scope !== "business" && (
                 <label>
                   <input
                     type="checkbox"
@@ -131,6 +168,29 @@ export function BusinessTimePresentation({ timeZone }: { timeZone: string }) {
               <button disabled={busy}>Save time display settings</button>
             </form>
           )}
+          {!organization &&
+            settings.can_manage &&
+            settings.scope === "organization" && (
+              <form
+                data-operation="time-presentation-access"
+                onSubmit={governAccess}
+              >
+                <label>
+                  Organization user code
+                  <input name="code" pattern="[A-Z]{2}[0-9]{4}" required />
+                </label>
+                <label>
+                  Settings access
+                  <select name="access">
+                    <option value="grant">Grant</option>
+                    <option value="revoke">Revoke</option>
+                  </select>
+                </label>
+                <button disabled={busy}>
+                  Update Organization settings access
+                </button>
+              </form>
+            )}
         </>
       )}
       <p role="status">{notice}</p>
