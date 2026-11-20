@@ -166,6 +166,21 @@ it("shows the Indian platform settings and manages the clock format", async () =
         can_manage: true,
       });
     }
+    if (
+      path ===
+      "global-business-settings/unit-conversion?quantity=2&from=kg&to=g"
+    )
+      return json({ quantity: 2000, unit: "g" });
+    if (path === "global-business-settings/postal-locations?pin_code=411001")
+      return json({
+        data: [
+          {
+            office: "Test Office",
+            district: "Test District",
+            state_or_union_territory: "Maharashtra",
+          },
+        ],
+      });
     if (path === "global-business-settings")
       return json({
         stable_core: {
@@ -177,7 +192,12 @@ it("shows the Indian platform settings and manages the clock format", async () =
           measurement_system: "Metric",
         },
         reference_data: {
-          units: { mass: ["kg"], length: ["m"], volume: ["L"], area: ["acre"] },
+          units: {
+            mass: ["kg", "g"],
+            length: ["m"],
+            volume: ["L"],
+            area: ["acre"],
+          },
           address_fields: ["district", "pin_code"],
         },
         platform_defaults: {
@@ -196,6 +216,23 @@ it("shows the Indian platform settings and manages the clock format", async () =
   const settings = document.querySelector(".workspace-content")!;
   expect(settings.textContent).toContain("PIN code");
   expect(settings.textContent).toContain("acre");
+  const postal = 'form[data-operation="postal-lookup"]';
+  document.querySelector<HTMLInputElement>(
+    postal + ' [name="pin_code"]',
+  )!.value = "411001";
+  await submit(postal);
+  expect(settings.textContent).toContain(
+    "Test Office, Test District, Maharashtra",
+  );
+  const conversion = 'form[data-operation="unit-conversion"]';
+  document.querySelector<HTMLInputElement>(
+    conversion + ' [name="quantity"]',
+  )!.value = "2";
+  document.querySelector<HTMLSelectElement>(
+    conversion + ' [name="to"]',
+  )!.value = "g";
+  await submit(conversion);
+  expect(settings.querySelector("output")?.textContent).toBe("2,000 g");
   const values = Array.from(settings.querySelectorAll("dd"))
     .slice(0, 8)
     .map((value) => value.textContent);
@@ -1166,6 +1203,7 @@ it("loads the customer mapping workspace and sends each action to its assigned b
     if (path.endsWith("/confirm")) return json({ state: "Active" });
     if (path === "businesses/shop/mappings/m1/history?page=1")
       return json({
+        mapping_type: { code: "distributor_shop", name: "Distributor–Shop" },
         data: [
           {
             id: "event",
@@ -1228,6 +1266,7 @@ it("loads the customer mapping workspace and sends each action to its assigned b
   expect(
     document.querySelector('[aria-label="Mapping History"]')?.textContent,
   ).toContain("activated");
+  expect(document.body.textContent).toContain("Mapping type: Distributor–Shop");
   await click("Next history page");
   expect(document.body.textContent).toContain("No history on this page.");
   await click("Previous history page");
@@ -1787,9 +1826,9 @@ it("submits and reviews a governed business closure", async () => {
   expect(document.body.textContent).toContain(
     "Closure awaiting approval: approval-1",
   );
-  await click("Load closure requests");
+  await click("Load transition requests");
   expect(document.body.textContent).toContain("Confirmed closure");
-  await click("Approve closure");
+  await click("Approve transition");
   expect(document.body.textContent).toContain("Closure request approved.");
 });
 
@@ -2101,6 +2140,7 @@ it("changes a subscription state and resolves features for a covered business", 
       return json({
         business_id: "shop",
         feature_codes: state === "Active" ? ["portal.reports"] : [],
+        capacities: state === "Active" ? { "portal.capacity": 10 } : undefined,
       });
     throw new Error(path);
   });
@@ -2170,6 +2210,8 @@ it("changes a subscription state and resolves features for a covered business", 
   expect(
     document.querySelector('[aria-label="Available features"]')?.textContent,
   ).toContain("portal.reports");
+  expect(document.querySelector('[aria-label="Available capacity"]')?.textContent)
+    .toContain("portal.capacity10");
   await apply("suspend", "Commercial review");
   expect(
     document.querySelector('[aria-label="Available features"]'),
@@ -2216,6 +2258,7 @@ it("issues a billing record and records payments and reversals", async () => {
                   entry_type: results === 2 ? "reversal" : "payment",
                   receipt_reference: "R-01",
                   delta_paise: results === 2 ? -2000 : 2000,
+                  reason: results === 2 ? "Correction" : null,
                 },
               ]
             : [],
@@ -2265,6 +2308,7 @@ it("issues a billing record and records payments and reversals", async () => {
   await submit(reverse);
   expect(document.body.textContent).toContain("Payment reversal recorded");
   expect(document.body.textContent).toContain("(₹20.00)");
+  expect(document.body.textContent).toContain("Reversal reason: Correction");
   set(reverse, "payment", "missing");
   set(reverse, "reason", "Correction");
   await submit(reverse);

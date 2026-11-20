@@ -15,3 +15,7 @@ The current development branch contains installation, the first Main Portal Owne
 ## Verification
 
 Run `composer test:coverage` from the backend with a PHP coverage driver enabled. Run `npm test` and `npm run build` from the frontend. Each coverage threshold is 90%.
+
+## Indian postal reference data
+
+Download the Department of Posts [All India Pincode Directory](https://data.gov.in/resource/all-india-pincode-directory-till-last-month) CSV and run `php artisan reference:import-postal /path/to/directory.csv` from `backend` after migrating. The import replaces the directory transactionally. The settings dashboard searches the installed snapshot by PIN and returns matching offices, districts and states or union territories. This is a postal reference lookup. It does not establish that an individual street address is valid.

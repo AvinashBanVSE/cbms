@@ -24,14 +24,14 @@ final class CommercialAddOnController
         $this->access->requirePermission('commercial.manage');
         $input = $request->validate([
             'provider_id' => 'required|uuid', 'family' => 'required|in:operator,tenant,dealer',
-            'name' => 'required|string|max:100',
+            'name' => 'required|string|max:100', 'type' => 'sometimes|required|in:feature,capacity',
         ]);
         abort_unless(DB::table('business_identities')->where('id', $input['provider_id'])
             ->whereIn('kind', ['Main Portal', 'Sub-Portal'])->where('operational_state', 'Active')->exists(), 422);
         $id = Str::uuid7()->toString();
         try {
             DB::transaction(function () use ($id, $input): void {
-                DB::table('commercial_add_ons')->insert(['id' => $id, ...$input, 'type' => 'feature']);
+                DB::table('commercial_add_ons')->insert(['id' => $id, ...$input, 'type' => $input['type'] ?? 'feature']);
                 $this->record('commercial.add_on_created', $id, []);
             });
         } catch (UniqueConstraintViolationException) {
@@ -49,6 +49,8 @@ final class CommercialAddOnController
             'amount_paise' => 'required|integer|min:0|max:999999999999',
             'entitlements' => 'required|array|list|min:1|max:100',
             'entitlements.*' => 'required|string|distinct|exists:commercial_entitlement_definitions,code',
+            'capacities' => 'sometimes|array|max:100',
+            'capacities.*' => 'required|integer|min:1|max:1000000000',
         ]);
 
         return DB::transaction(function () use ($addOn, $input): JsonResponse {
@@ -58,14 +60,15 @@ final class CommercialAddOnController
                 ->join('commercial_plans as plan', 'plan.id', '=', 'version.plan_id')
                 ->where('version.id', $input['plan_version_id'])->where('plan.provider_id', $record->provider_id)
                 ->where('plan.family', $record->family)->exists(), 422, 'Select a Plan Version from the Add-on provider and family.');
-            $features = DB::table('commercial_entitlement_definitions')->whereIn('code', $input['entitlements'])
-                ->where(['type' => 'feature', 'composition' => 'any'])->orderBy('code')->get(['code', 'type', 'composition']);
-            abort_unless($features->count() === count($input['entitlements']), 422, 'Select Feature Entitlements.');
+            $definitions = DB::table('commercial_entitlement_definitions')->whereIn('code', $input['entitlements'])
+                ->where('type', $record->type)->orderBy('code')->get(['code', 'type', 'composition']);
+            abort_unless($definitions->count() === count($input['entitlements']), 422, 'Select entitlements matching the Add-on type.');
+            SubscriptionAddOns::applyCapacityQuantities($definitions, $input['capacities'] ?? []);
             $version = 1 + (int) DB::table('commercial_add_on_versions')->where('add_on_id', $addOn)->max('version');
             $id = Str::uuid7()->toString();
             DB::table('commercial_add_on_versions')->insert([
                 'id' => $id, 'add_on_id' => $addOn, 'version' => $version, 'plan_version_id' => $input['plan_version_id'],
-                'amount_paise' => $input['amount_paise'], 'entitlements' => $features->toJson(JSON_THROW_ON_ERROR), 'published_at' => now(),
+                'amount_paise' => $input['amount_paise'], 'entitlements' => $definitions->toJson(JSON_THROW_ON_ERROR), 'published_at' => now(),
             ]);
             $this->record('commercial.add_on_version_published', $id, ['add_on_id' => $addOn, 'version' => $version]);
 

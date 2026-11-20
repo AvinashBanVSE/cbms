@@ -4,10 +4,24 @@ declare(strict_types=1);
 
 namespace App\Commercial;
 
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 final class SubscriptionAddOns
 {
+    public static function applyCapacityQuantities(Collection $definitions, array $quantities): void
+    {
+        $capacities = $definitions->where('type', 'capacity');
+        $codes = $capacities->pluck('code')->all();
+        if (array_diff($codes, array_keys($quantities)) || array_diff(array_keys($quantities), $codes)) {
+            throw ValidationException::withMessages(['capacities' => 'Provide one quantity for each selected capacity entitlement.']);
+        }
+        foreach ($capacities as $definition) {
+            $definition->quantity = (int) $quantities[$definition->code];
+        }
+    }
+
     public static function requireEligibleCoverage(string $term, string $business, string $organization): void
     {
         $coverage = DB::table('commercial_subscription_coverage as coverage')

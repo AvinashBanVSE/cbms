@@ -57,7 +57,12 @@ final class CommercialFoundationTest extends TestCase
         $publish = "{$base}/plans/{$plan}/versions";
         $terms = ['amount_paise' => 12345, 'term_days' => 30, 'entitlements' => ['portal.reports']];
         $this->postJson($publish, [...$terms, 'entitlements' => ['unknown.feature']])->assertUnprocessable();
-        $version = $this->postJson($publish, $terms)->assertCreated()->assertJsonPath('version', 1)->json('id');
+        $this->postJson($base.'/entitlements', [
+            'code' => 'portal.capacity', 'name' => 'Capacity', 'type' => 'capacity', 'composition' => 'maximum',
+        ])->assertCreated();
+        $capacityTerms = [...$terms, 'entitlements' => ['portal.reports', 'portal.capacity']];
+        $this->postJson($publish, $capacityTerms)->assertUnprocessable()->assertJsonValidationErrors('capacities');
+        $version = $this->postJson($publish, [...$capacityTerms, 'capacities' => ['portal.capacity' => 10], 'trial_days' => 7])->assertCreated()->assertJsonPath('version', 1)->json('id');
         $nextVersion = $this->postJson($publish, [...$terms, 'amount_paise' => 20000, 'entitlements' => []])
             ->assertCreated()->assertJsonPath('version', 2)->json('id');
         $this->assertDatabaseHas('commercial_plan_versions', ['id' => $version, 'amount_paise' => 12345]);
@@ -66,6 +71,16 @@ final class CommercialFoundationTest extends TestCase
         $input = ['account_id' => $account, 'plan_version_id' => $version, 'starts_on' => '2032-02-28', 'renewal_mode' => 'manual'];
         $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'selected', 'business_ids' => [$otherChild]])->assertUnprocessable();
         $selected = $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'selected', 'business_ids' => [$child]])->assertCreated()->json('id');
+        $capacityAddOn = $this->postJson($base.'/add_ons', [
+            'provider_id' => $provider, 'family' => 'tenant', 'name' => 'Capacity expansion', 'type' => 'capacity',
+        ])->assertCreated()->json('id');
+        $capacityVersion = $this->postJson("{$base}/add_ons/{$capacityAddOn}/versions", [
+            'plan_version_id' => $version, 'amount_paise' => 0,
+            'entitlements' => ['portal.capacity'], 'capacities' => ['portal.capacity' => 25],
+        ])->assertCreated()->json('id');
+        $attachment = "{$base}/subscriptions/{$selected}/add_ons";
+        $this->postJson($attachment, ['add_on_version_id' => $capacityVersion, 'business_id' => $organization])->assertUnprocessable();
+        $this->postJson($attachment, ['add_on_version_id' => $capacityVersion, 'business_id' => $child])->assertCreated();
         $self = $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'organization'])->assertCreated()->json('id');
         $network = $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'network'])->assertCreated()->json('id');
         $future = $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'future_network'])->assertCreated()->json('id');
@@ -87,6 +102,18 @@ final class CommercialFoundationTest extends TestCase
         $this->assertBilling($base, $selected, $organization);
         $this->assertSubscriptionLifecycle($base, $selected, $child, $organization, $otherChild, $nextVersion);
         $this->assertAutomaticRenewal($base, [...$input, 'coverage_mode' => 'future_network'], $organization, $child);
+        $trial = $this->postJson($base.'/subscriptions', [
+            ...$input, 'starts_on' => '2032-05-01', 'coverage_mode' => 'organization', 'trial_reason' => 'Approved evaluation',
+        ])->assertCreated()->assertJsonPath('state', 'Trial')->json('id');
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $trial, 'ends_before' => '2032-05-08']);
+        $this->travelTo(CarbonImmutable::parse('2032-05-01', 'Asia/Kolkata'));
+        $this->postJson($base.'/invoices', ['subscription_id' => $trial, 'due_on' => '2032-05-01'])->assertConflict();
+        $trialEntitlements = "{$base}/businesses/{$organization}/effective-entitlements";
+        $this->getJson($trialEntitlements)->assertOk()->assertJsonPath('capacities', ['portal.capacity' => 10]);
+        $this->travelTo(CarbonImmutable::parse('2032-05-08', 'Asia/Kolkata'));
+        $this->getJson($trialEntitlements)->assertOk()->assertJsonMissingPath('capacities');
+        $this->travelBack();
+
         DB::table('customer_tenants')->where('id', $tenant)->update(['provider_id' => $portal]);
         $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'organization'])->assertConflict();
         $this->travelTo(CarbonImmutable::parse('2032-03-02', 'Asia/Kolkata'));
@@ -134,6 +161,11 @@ final class CommercialFoundationTest extends TestCase
         DB::table('customer_tenants')->where('id', $account->tenant_id)->update(['provider_id' => $account->provider_id]);
         $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
         $this->assertDatabaseCount('jobs', 1);
+        DB::table('business_identities')->where('id', $account->provider_id)->update(['operational_state' => 'Suspended']);
+        Queue::connection('database')->pop()->fire();
+        $this->assertDatabaseMissing('commercial_subscriptions', ['renewed_from_id' => $subscription]);
+        DB::table('business_identities')->where('id', $account->provider_id)->update(['operational_state' => 'Active']);
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
         Queue::connection('database')->pop()->fire();
         $this->assertDatabaseCount('jobs', 0);
         config(['queue.default' => 'sync']);
@@ -206,7 +238,7 @@ final class CommercialFoundationTest extends TestCase
         $plan = DB::table('commercial_plan_versions')->where('id', $input['plan_version_id'])->value('plan_id');
         $nextPlan = DB::table('commercial_plan_versions')->where('plan_id', $plan)->where('version', 2)->value('id');
         $incompatible = $this->postJson($publish, [...$release, 'plan_version_id' => $nextPlan])->assertCreated()->json('id');
-        $this->getJson($base.'?section=add_on_versions')->assertOk()->assertJsonCount(3, 'data');
+        $this->getJson($base.'?section=add_on_versions')->assertOk()->assertJsonCount(4, 'data');
 
         $attach = "{$base}/subscriptions/{$subscription}/add_ons";
         $assignment = ['add_on_version_id' => $version, 'business_id' => $child];
@@ -238,7 +270,8 @@ final class CommercialFoundationTest extends TestCase
         $payment = $this->postJson($payments, ['receipt_reference' => 'REPLACEMENT', 'amount_paise' => 2000])->assertCreated()->json('payment_id');
         $this->postJson($transition, $activate)->assertOk()->assertJsonPath('state', 'Active');
         $this->postJson($transition, $activate)->assertConflict()->assertJsonPath('message', 'The Subscription state changed. Reload the commercial records.');
-        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports'])
+            ->assertJsonPath('capacities', ['portal.capacity' => 25]);
         $this->getJson("{$base}/businesses/{$organization}/effective-entitlements")->assertOk()->assertJsonPath('feature_codes', []);
         DB::table('commercial_subscription_coverage')->insert(['subscription_id' => $subscription, 'business_id' => $otherChild]);
         $this->getJson("{$base}/businesses/{$otherChild}/effective-entitlements")->assertOk()->assertJsonPath('feature_codes', []);
@@ -327,7 +360,9 @@ final class CommercialFoundationTest extends TestCase
         ])->assertOk();
         $this->getJson($payments)->assertOk()->assertJsonCount(3, 'history.data')
             ->assertJsonPath('presentation.negative_amount', 'parentheses')
-            ->assertJsonFragment(['entry_type' => 'reversal', 'delta_paise' => -2000]);
+            ->assertJsonFragment([
+                'entry_type' => 'reversal', 'delta_paise' => -2000, 'reason' => 'Receipt corrected',
+            ]);
         $this->assertDatabaseHas('commercial_payments', ['id' => $payment, 'amount_paise' => 2000]);
         $this->assertDatabaseHas('commercial_billing_ledger', ['payment_id' => $payment, 'entry_type' => 'reversal', 'delta_paise' => -2000]);
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $subscription, 'state' => 'Pending Activation']);

@@ -86,6 +86,9 @@ final class SubscriptionRenewal
 
                 return null;
             }
+            if ($automatic && ! $this->activeProvider($account->provider_id)) {
+                return null;
+            }
             if ($existing !== null) {
                 abort_unless($existing->account_id === $account->id && $existing->plan_version_id === $version, 409, 'A renewal already exists for this term.');
 
@@ -164,7 +167,7 @@ final class SubscriptionRenewal
             if ($prior === null || $term === null || $tenant->provider_id !== $account->provider_id
                 || $organization->operational_state === 'Closed' || $prior->state !== 'Active'
                 || ! in_array($term->state, ['Pending Activation', 'Grace Period'], true)
-                || $term->starts_on > $today || $term->ends_before <= $today) {
+                || $term->starts_on > $today || $term->ends_before <= $today || ! $this->activeProvider($account->provider_id)) {
                 return;
             }
             $invoice = SubscriptionTerms::invoiceForSettlement($renewal);
@@ -186,6 +189,13 @@ final class SubscriptionRenewal
                 'tenant_id' => $tenant->id, 'provider_id' => $account->provider_id,
             ]);
         }, attempts: 3);
+    }
+
+    private function activeProvider(string $provider): bool
+    {
+        return DB::table('business_identities')->where('id', $provider)
+            ->whereIn('kind', ['Main Portal', 'Sub-Portal'])->where('operational_state', 'Active')
+            ->lockForUpdate()->first(['id']) !== null;
     }
 
     private function matchesJob(?object $account, ProcessSubscriptionRenewal $job): bool

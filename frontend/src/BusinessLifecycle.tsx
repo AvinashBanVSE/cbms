@@ -13,6 +13,7 @@ interface ClosureQueue {
   data: {
     id: string;
     reason: string;
+    target_state?: string;
     expires_at: string | null;
     can_decide: boolean;
   }[];
@@ -73,7 +74,7 @@ export function BusinessLifecycle({
       ).json();
       setRetry(undefined);
       if (result.status === "pending") {
-        setNotice("Closure awaiting approval: " + result.approval_id);
+        setNotice((request.state === "Closed" ? "Closure" : request.state) + " awaiting approval: " + result.approval_id);
         return;
       }
       setCurrent(undefined);
@@ -107,12 +108,21 @@ export function BusinessLifecycle({
           .map((code) => code.trim())
           .filter(Boolean),
         expiry_minutes: Number(data.get("expiry_minutes")) || null,
+        ...(data.get("target_state") !== "Closed" ? { target_state: String(data.get("target_state")) } : {}),
+        ...(data.has("cancel_pending") ? { cancel_pending: true } : {}),
+        ...(data.get("required_votes")
+          ? { required_votes: Number(data.get("required_votes")) }
+          : {}),
       });
+      if (data.has("cancel_pending")) setClosures(undefined);
       setNotice("Closure approval policy saved.");
     });
   }
 
-  function decide(approval: string, decision: "approve" | "reject") {
+  function decide(
+    approval: string,
+    decision: "approve" | "reject" | "withdraw",
+  ) {
     return run(async () => {
       const response = await portalRequest(
         path + "/closure-approvals/" + encodeURIComponent(approval),
@@ -166,13 +176,32 @@ export function BusinessLifecycle({
               data-operation="business-closure-policy"
             >
               <label>
-                Closure reviewer codes
+                Policy target state
+                <select name="target_state" defaultValue="Closed">
+                  {["Pending Verification", "Active", "Suspended", "Deactivated", "Closed"].map((state) => (
+                    <option key={state}>{state}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Reviewer codes
                 <input name="reviewers" />
               </label>
               <p>
-                Separate codes with commas. One listed reviewer must approve.
-                Leave blank to turn off approval for new requests.
+                Separate codes with commas. Set the number of listed reviewers
+                who must approve. Leave blank to turn off approval for new
+                requests.
               </p>
+              <label>
+                Required approvals
+                <input
+                  name="required_votes"
+                  type="number"
+                  min="1"
+                  max="10"
+                  placeholder="1"
+                />
+              </label>
               <label>
                 Approval validity in minutes
                 <input
@@ -182,11 +211,15 @@ export function BusinessLifecycle({
                   max="525600"
                 />
               </label>
-              <button disabled={busy}>Save closure approval policy</button>
+              <label>
+                <input name="cancel_pending" type="checkbox" />
+                Cancel pending requests for this business and target state
+              </label>
+              <button disabled={busy}>Save transition approval policy</button>
             </form>
           )}
           <button disabled={busy} onClick={() => run(() => loadClosures(1))}>
-            Load closure requests
+            Load transition requests
           </button>
           {closures && (
             <>
@@ -194,41 +227,48 @@ export function BusinessLifecycle({
                 <ul aria-label="Closure requests">
                   {closures.data.map((request) => (
                     <li key={request.id}>
-                      <p>{request.reason}</p>
+                      <p>{request.target_state && request.target_state + " · "}{request.reason}</p>
                       {request.expires_at && (
                         <p>
                           Expires{" "}
                           {indiaTime.format(new Date(request.expires_at))}
                         </p>
                       )}
-                      {request.can_decide && (
+                      {request.can_decide ? (
                         <>
                           <button
                             disabled={busy}
                             onClick={() => decide(request.id, "approve")}
                           >
-                            Approve closure
+                            Approve transition
                           </button>
                           <button
                             disabled={busy}
                             onClick={() => decide(request.id, "reject")}
                           >
-                            Reject closure
+                            Reject transition
                           </button>
                         </>
+                      ) : (
+                        <button
+                          disabled={busy}
+                          onClick={() => decide(request.id, "withdraw")}
+                        >
+                          Withdraw transition request
+                        </button>
                       )}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p>No pending closure requests.</p>
+                <p>No pending transition requests.</p>
               )}
               {closurePage > 1 && (
                 <button
                   disabled={busy}
                   onClick={() => run(() => loadClosures(closurePage - 1))}
                 >
-                  Previous closure requests
+                  Previous transition requests
                 </button>
               )}
               {closures.next_page_url && (
@@ -236,7 +276,7 @@ export function BusinessLifecycle({
                   disabled={busy}
                   onClick={() => run(() => loadClosures(closurePage + 1))}
                 >
-                  Next closure requests
+                  Next transition requests
                 </button>
               )}
             </>

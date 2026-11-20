@@ -16,6 +16,7 @@ interface LedgerEntry {
   receipt_reference: string;
   entry_type: string;
   delta_paise: number;
+  reason: string | null;
 }
 
 interface Page<T> {
@@ -200,6 +201,7 @@ export function CommercialBilling() {
                   entry.delta_paise,
                   selected.presentation?.negative_amount,
                 )}
+                {entry.reason && <p>Reversal reason: {entry.reason}</p>}
               </li>
             ))}
           </ul>

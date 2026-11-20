@@ -68,6 +68,30 @@ final class PortalBootstrapTest extends TestCase
                 'address_fields' => ['locality', 'district', 'state_or_union_territory', 'pin_code'],
             ],
         ]);
+        $postal = '/api/v1/global-business-settings/postal-locations';
+        $this->getJson($postal.'?pin_code=411001')->assertServiceUnavailable();
+        $directory = tempnam(sys_get_temp_dir(), 'cbm-postal-');
+        try {
+            file_put_contents($directory, 'CircleName,OfficeName,Pincode,District,StateName
+Example,Test Office,411001,Test District,MAHARASHTRA
+Example,Second Office,411001,Test District,MAHARASHTRA
+');
+            $this->artisan('reference:import-postal', ['file' => $directory])->assertSuccessful();
+            $this->getJson($postal.'?pin_code=411001')->assertOk()->assertJsonCount(2, 'data')
+                ->assertJsonPath('data.0.office', 'Second Office');
+            $this->getJson($postal.'?pin_code=999999')->assertOk()->assertJsonCount(0, 'data');
+            file_put_contents($directory, 'OfficeName,Pincode,District,StateName
+Broken,123,Bad,Invalid
+');
+            $this->artisan('reference:import-postal', ['file' => $directory])->assertFailed();
+            $this->getJson($postal.'?pin_code=411001')->assertOk()->assertJsonCount(2, 'data');
+        } finally {
+            unlink($directory);
+        }
+        $pinFormat = '/api/v1/global-business-settings/pin-format';
+        $this->getJson($pinFormat.'?pin_code=411001')
+            ->assertOk()->assertExactJson(['pin_code' => '411001', 'validation' => 'format']);
+        $this->getJson($pinFormat.'?pin_code=41101')->assertUnprocessable()->assertJsonValidationErrors('pin_code');
         $conversion = '/api/v1/global-business-settings/unit-conversion';
         $this->getJson($conversion.'?quantity=2&from=kg&to=g')->assertOk()->assertExactJson(['quantity' => 2000, 'unit' => 'g']);
         $this->getJson($conversion.'?quantity=2&from=kg&to=m')->assertUnprocessable()->assertJsonValidationErrors('to');

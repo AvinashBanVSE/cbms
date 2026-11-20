@@ -33,6 +33,9 @@ final class BusinessMappingTest extends TestCase
         $this->postJson($endpoint, ['distributor_id' => $distributor])->assertForbidden();
         DB::table('customer_business_scopes')->insert(['user_id' => $shopUser->id, 'business_id' => $shop]);
 
+        $this->postJson($endpoint, ['distributor_id' => $distributor, 'mapping_type' => 'unregistered'])
+            ->assertUnprocessable()->assertJsonValidationErrors('mapping_type');
+
         $start = $this->postJson($endpoint, ['distributor_id' => $distributor])->assertCreated()
             ->assertHeader('Cache-Control', 'no-store, private');
         $id = $start->json('id');
@@ -77,6 +80,9 @@ final class BusinessMappingTest extends TestCase
         DB::table('customer_permissions')->insert(['user_id' => $shopUser->id, 'business_id' => $shop, 'action' => 'mapping.history.view']);
         $this->getJson($history)->assertOk()->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonCount(4, 'data')->assertJsonPath('data.0.action', 'terminated')
+            ->assertJsonPath('mapping_type.code', 'distributor_shop')
+            ->assertJsonPath('mapping_type.allowed_transactions', [])
+            ->assertJsonPath('mapping_type.shared_data_fields', [])
             ->assertJsonMissingPath('data.0.actor_id')->assertJsonMissingPath('data.0.code_digest');
         $this->getJson('/api/v1/audit-trail')->assertForbidden();
         $this->getJson("/api/v1/businesses/{$distributor}/mappings/{$id}/history")->assertForbidden();

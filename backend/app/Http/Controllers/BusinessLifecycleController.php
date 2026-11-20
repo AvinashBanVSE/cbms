@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 final class BusinessLifecycleController
 {
@@ -41,28 +42,29 @@ final class BusinessLifecycleController
             'reason' => 'required|string|max:500',
         ]);
 
-        $actor = (string) Auth::id();
-        if ($input['state'] === 'Closed') {
-            $input['expected_version'] = (int) $input['expected_version'];
-            $result = $this->closure->request($business, $actor, $input);
+        $input['expected_version'] = (int) $input['expected_version'];
+        $result = $this->closure->request($business, (string) Auth::id(), $input);
 
-            return response()->json($result, ($result['status'] ?? null) === 'pending' ? 202 : 200);
-        }
-
-        return response()->json($this->lifecycle->transition($business, $actor, $input));
+        return response()->json($result, ($result['status'] ?? null) === 'pending' ? 202 : 200);
     }
 
     public function closurePolicy(Request $request, string $business): JsonResponse
     {
         $this->access->requirePermission('business_structure.closure_policy');
         $input = $request->validate([
+            'target_state' => ['sometimes', 'required', Rule::in(BusinessClosureApproval::TARGET_STATES)],
             'reviewers' => 'present|array|list|max:10',
+            'required_votes' => 'sometimes|integer|min:1|max:10',
+            'cancel_pending' => 'sometimes|boolean',
             'reviewers.*' => 'required|distinct|regex:/^[A-Z]{2}[0-9]{4}$/D',
             'expiry_minutes' => 'nullable|integer|between:1,525600',
         ]);
-        $this->closure->configure($business, (string) Auth::id(), $input);
+        $cancelled = $this->closure->configure($business, (string) Auth::id(), $input);
 
-        return response()->json(['reviewer_count' => count($input['reviewers'])]);
+        return response()->json([
+            'reviewer_count' => count($input['reviewers']),
+            ...(($input['cancel_pending'] ?? false) ? ['cancelled_requests' => $cancelled] : []),
+        ]);
     }
 
     public function pendingClosures(string $business): JsonResponse
@@ -78,7 +80,7 @@ final class BusinessLifecycleController
                 $command = json_decode($row->command, true, flags: JSON_THROW_ON_ERROR);
 
                 return [
-                    'id' => $row->id, 'reason' => $command['reason'], 'can_decide' => $row->requester_id !== $actor,
+                    'id' => $row->id, 'reason' => $command['reason'], 'target_state' => $command['state'], 'can_decide' => $row->requester_id !== $actor,
                     'expires_at' => $row->expires_at === null ? null : CarbonImmutable::parse($row->expires_at)->toISOString(),
                 ];
             });
@@ -89,11 +91,11 @@ final class BusinessLifecycleController
     public function decideClosure(Request $request, string $business, string $approval): JsonResponse
     {
         $this->access->requirePermission('business_structure.lifecycle');
-        $input = $request->validate(['decision' => 'required|in:approve,reject']);
+        $input = $request->validate(['decision' => 'required|in:approve,reject,withdraw']);
         $result = $this->closure->decide($business, $approval, (string) Auth::id(), $input['decision']);
 
         if (in_array($result['status'], ['expired', 'stale'], true)) {
-            return response()->json([...$result, 'message' => 'This closure request is no longer valid.'], 409);
+            return response()->json([...$result, 'message' => 'This lifecycle request is no longer valid.'], 409);
         }
 
         return response()->json($result);

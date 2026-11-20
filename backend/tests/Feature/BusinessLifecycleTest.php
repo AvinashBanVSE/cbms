@@ -119,7 +119,50 @@ final class BusinessLifecycleTest extends TestCase
             'business_id' => $portal, 'user_id' => $requester->id, 'permission' => 'business_structure.closure_policy',
         ]);
         $this->postJson($path.'/closure-policy', [...$policy, 'reviewers' => ['AA9999']])->assertUnprocessable();
+        $second = Str::uuid7()->toString();
+        DB::table('users')->insert(['id' => $second, 'code' => 'AA1938', 'email' => 'second-reviewer@example.test', 'password' => 'unused']);
+        DB::table('portal_grants')->insert([...$permission, 'user_id' => $second]);
+        $this->postJson($path.'/closure-policy', [...$policy, 'required_votes' => 2])->assertUnprocessable();
+        $this->postJson($path.'/closure-policy', [
+            ...$policy, 'reviewers' => ['AA1933', 'AA1938'], 'required_votes' => 2,
+        ])->assertOk();
+        $multiple = $this->command('Closed', 0);
+        $this->postJson($path, $multiple)->assertAccepted();
+        $multipleDecision = $path.'/closure-approvals/'.$multiple['operation_id'];
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($multipleDecision, ['decision' => 'approve'])->assertOk()->assertJsonPath('status', 'pending');
+        $this->postJson($multipleDecision, ['decision' => 'approve'])->assertConflict();
+        DB::table('portal_grants')->where($permission)->delete();
+        $this->actingAs(User::findOrFail($second));
+        $this->postJson($multipleDecision, ['decision' => 'approve'])->assertOk()->assertJsonPath('status', 'pending');
+        $this->assertDatabaseHas('business_identities', ['id' => $business, 'operational_state' => 'Active']);
+        DB::table('portal_grants')->insert($permission);
+        $this->actingAs($requester);
+        $this->postJson($multipleDecision, ['decision' => 'withdraw'])->assertOk();
         $this->postJson($path.'/closure-policy', $policy)->assertExactJson(['reviewer_count' => 1]);
+        $cancelled = $this->command('Closed', 0);
+        $this->postJson($path, $cancelled)->assertAccepted();
+        $this->postJson($path.'/closure-policy', $policy)->assertOk();
+        $this->assertDatabaseHas('business_closure_approvals', ['id' => $cancelled['operation_id'], 'status' => 'pending']);
+        $this->postJson($path.'/closure-policy', [...$policy, 'cancel_pending' => true])
+            ->assertExactJson(['reviewer_count' => 1, 'cancelled_requests' => 1]);
+        $this->assertDatabaseHas('business_closure_approvals', ['id' => $cancelled['operation_id'], 'status' => 'cancelled']);
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($path.'/closure-approvals/'.$cancelled['operation_id'], ['decision' => 'approve'])->assertConflict();
+        $this->actingAs($requester);
+
+        $withdrawn = $this->command('Closed', 0);
+        $this->postJson($path, $withdrawn)->assertAccepted();
+        $withdrawal = $path.'/closure-approvals/'.$withdrawn['operation_id'];
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($withdrawal, ['decision' => 'withdraw'])->assertForbidden();
+        $this->actingAs($requester);
+        $this->postJson($withdrawal, ['decision' => 'withdraw'])->assertOk()->assertJsonPath('status', 'withdrawn');
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($withdrawal, ['decision' => 'approve'])->assertConflict();
+        $this->actingAs($requester);
+        $this->assertDatabaseHas('business_identities', ['id' => $business, 'operational_state' => 'Active']);
+
         $this->freezeSecond();
         $first = $this->command('Closed', 0);
         $this->postJson($path, $first)->assertAccepted()->assertJsonPath('approval_id', $first['operation_id']);
@@ -141,6 +184,16 @@ final class BusinessLifecycleTest extends TestCase
         $this->postJson($decision, ['decision' => 'approve'])->assertConflict()->assertJsonPath('status', 'expired');
 
         $this->actingAs($requester);
+        $this->postJson($path.'/closure-policy', [...$policy, 'target_state' => 'Suspended'])->assertOk();
+        $suspension = $this->command('Suspended', 0);
+        $this->postJson($path, $suspension)->assertAccepted();
+        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonPath('data.0.target_state', 'Suspended');
+        $this->actingAs(User::findOrFail($reviewer));
+        $this->postJson($path.'/closure-approvals/'.$suspension['operation_id'], ['decision' => 'reject'])
+            ->assertOk()->assertJsonPath('status', 'rejected');
+        $this->assertDatabaseHas('business_identities', ['id' => $business, 'operational_state' => 'Active']);
+        $this->actingAs($requester);
+        $this->postJson($path.'/closure-policy', [...$policy, 'target_state' => 'Suspended', 'reviewers' => []])->assertOk();
         $stale = $this->command('Closed', 0);
         $this->postJson($path, $stale)->assertAccepted();
         $this->postJson($path, $this->command('Suspended', 0))->assertOk();

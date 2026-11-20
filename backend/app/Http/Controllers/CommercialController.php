@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Commercial\SubscriptionAddOns;
 use App\Commercial\SubscriptionCoverage;
 use App\Commercial\SubscriptionRenewal;
 use App\Commercial\SubscriptionTerms;
@@ -93,9 +94,15 @@ final class CommercialController
     {
         $this->access->requirePermission('commercial.manage');
         $data = $request->validate(['code' => 'required|string|max:80|regex:/^[a-z][a-z0-9_.-]*$/D', 'name' => 'required|string|max:150']);
+        $type = $request->validate([
+            'type' => 'sometimes|required|in:feature,capacity',
+            'composition' => 'required_if:type,capacity|missing_unless:type,capacity|in:additive,maximum',
+        ]);
         try {
-            DB::transaction(function () use ($data): void {
-                DB::table('commercial_entitlement_definitions')->insert([...$data, 'type' => 'feature', 'composition' => 'any']);
+            DB::transaction(function () use ($data, $type): void {
+                DB::table('commercial_entitlement_definitions')->insert([
+                    ...$data, 'type' => $type['type'] ?? 'feature', 'composition' => $type['composition'] ?? 'any',
+                ]);
                 $this->audit('commercial.entitlement_registered', null, ['code' => $data['code']]);
             });
         } catch (UniqueConstraintViolationException) {
@@ -124,8 +131,11 @@ final class CommercialController
         $data = $request->validate([
             'amount_paise' => 'required|integer|min:0|max:999999999999',
             'term_days' => 'required|integer|min:1|max:3660',
+            'trial_days' => 'sometimes|required|integer|min:1|lte:term_days',
             'entitlements' => 'present|array|list|max:100',
             'entitlements.*' => 'required|string|distinct|exists:commercial_entitlement_definitions,code',
+            'capacities' => 'sometimes|array|max:100',
+            'capacities.*' => 'required|integer|min:1|max:1000000000',
         ]);
 
         return DB::transaction(function () use ($plan, $data): JsonResponse {
@@ -134,10 +144,11 @@ final class CommercialController
             $version = 1 + (int) DB::table('commercial_plan_versions')->where('plan_id', $plan)->max('version');
             $definitions = DB::table('commercial_entitlement_definitions')->whereIn('code', $data['entitlements'])
                 ->orderBy('code')->get(['code', 'type', 'composition']);
+            SubscriptionAddOns::applyCapacityQuantities($definitions, $data['capacities'] ?? []);
             $id = Str::uuid7()->toString();
             DB::table('commercial_plan_versions')->insert([
                 'id' => $id, 'plan_id' => $plan, 'version' => $version, 'amount_paise' => $data['amount_paise'],
-                'term_days' => $data['term_days'], 'entitlements' => $definitions->toJson(JSON_THROW_ON_ERROR), 'published_at' => now(),
+                'term_days' => $data['term_days'], 'trial_days' => $data['trial_days'] ?? null, 'entitlements' => $definitions->toJson(JSON_THROW_ON_ERROR), 'published_at' => now(),
             ]);
             $this->audit('commercial.plan_version_published', $id, ['plan_id' => $plan, 'version' => $version]);
 
@@ -154,6 +165,7 @@ final class CommercialController
             'renewal_lead_days' => 'required_if:renewal_mode,automatic|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
             'renewal_grace_days' => 'required_with:renewal_grace_policy|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
             'renewal_grace_policy' => 'required_with:renewal_grace_days|missing_unless:renewal_mode,automatic|in:retain_features,block_features',
+            'trial_reason' => 'sometimes|required|string|max:500',
             'coverage_mode' => 'required|in:organization,selected,network,future_network',
             'business_ids' => 'required_if:coverage_mode,selected|prohibited_unless:coverage_mode,selected|array|list|max:1000',
             'business_ids.*' => 'required|uuid|distinct:ignore_case',
@@ -165,6 +177,13 @@ final class CommercialController
             $tenant = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->first();
             abort_unless($tenant !== null && $tenant->provider_id === $account->provider_id, 409, 'This agreement requires a separate commercial transition.');
             $termDays = SubscriptionTerms::duration($account->provider_id, $data['plan_version_id']);
+            $trial = isset($data['trial_reason']);
+            if ($trial) {
+                $trialDays = DB::table('commercial_plan_versions')->where('id', $data['plan_version_id'])->value('trial_days');
+                abort_unless($trialDays !== null && $data['renewal_mode'] === 'manual', 422, 'A trial requires a published trial duration and manual renewal mode.');
+                $termDays = (int) $trialDays;
+            }
+            $state = $trial ? 'Trial' : 'Pending Activation';
             $leadDays = $data['renewal_lead_days'] ?? null;
             if ($leadDays > $termDays) {
                 throw ValidationException::withMessages(['renewal_lead_days' => 'The renewal lead time must fit within the term.']);
@@ -193,15 +212,18 @@ final class CommercialController
             $id = Str::uuid7()->toString();
             DB::table('commercial_subscriptions')->insert([
                 'id' => $id, 'account_id' => $account->id, 'plan_version_id' => $data['plan_version_id'],
-                'state' => 'Pending Activation', 'renewal_mode' => $data['renewal_mode'], 'coverage_mode' => $mode,
+                'state' => $state, 'renewal_mode' => $data['renewal_mode'], 'coverage_mode' => $mode,
                 'renewal_lead_days' => $leadDays,
                 'renewal_grace_days' => $graceDays, 'renewal_grace_policy' => $data['renewal_grace_policy'] ?? null,
                 'starts_on' => $start->toDateString(), 'ends_before' => $start->addDays($termDays)->toDateString(),
             ]);
             SubscriptionCoverage::assign($id, $coverage);
-            $this->audit('commercial.subscription_created', $id, ['account_id' => $account->id, 'coverage_mode' => $mode]);
+            $this->audit('commercial.subscription_created', $id, [
+                'account_id' => $account->id, 'coverage_mode' => $mode,
+                ...($trial ? ['trial_reason' => $data['trial_reason'], 'trial_days' => $termDays] : []),
+            ]);
 
-            return response()->json(['id' => $id, 'state' => 'Pending Activation'], 201);
+            return response()->json(['id' => $id, 'state' => $state], 201);
         }, attempts: 3);
     }
 
@@ -210,7 +232,7 @@ final class CommercialController
         $this->access->requirePermission('commercial.manage');
         $data = $request->validate([
             'action' => 'required|in:activate,suspend,cancel',
-            'expected_state' => 'required|in:Pending Activation,Active,Grace Period,Suspended',
+            'expected_state' => 'required|in:Pending Activation,Trial,Active,Grace Period,Suspended',
             'reason' => 'required|string|max:500',
         ]);
 
@@ -228,7 +250,7 @@ final class CommercialController
             [$allowed, $next] = match ($data['action']) {
                 'activate' => [['Pending Activation', 'Grace Period', 'Suspended'], 'Active'],
                 'suspend' => [['Active', 'Grace Period'], 'Suspended'],
-                'cancel' => [['Pending Activation', 'Active', 'Grace Period', 'Suspended'], 'Cancelled'],
+                'cancel' => [['Pending Activation', 'Trial', 'Active', 'Grace Period', 'Suspended'], 'Cancelled'],
             };
             abort_unless(in_array($record->state, $allowed, true), 409, 'This action is unavailable in the current Subscription state.');
 
@@ -284,24 +306,39 @@ final class CommercialController
                 });
             })->where('subscription.starts_on', '<=', $today)
             ->where('subscription.ends_before', '>', $today);
-        $plans = DB::table('commercial_plan_versions')->whereIn('id', $eligibleTerms->clone()->select('subscription.plan_version_id'))
-            ->select('entitlements');
+        $plans = DB::table('commercial_plan_versions as version')
+            ->joinSub($eligibleTerms->clone()->select('subscription.plan_version_id', 'subscription.state'), 'term', 'term.plan_version_id', '=', 'version.id')
+            ->select('version.entitlements', 'term.state');
         $addOns = DB::table('commercial_subscription_add_ons as assignment')
             ->join('commercial_add_on_versions as version', 'version.id', '=', 'assignment.add_on_version_id')
-            ->where('assignment.business_id', $business)->whereIn('assignment.subscription_id', $eligibleTerms->select('subscription.id'))
-            ->select('version.entitlements');
+            ->joinSub($eligibleTerms->select('subscription.id', 'subscription.state'), 'term', 'term.id', '=', 'assignment.subscription_id')
+            ->where('assignment.business_id', $business)->select('version.entitlements', 'term.state');
 
         $features = [];
+        $capacities = [];
         foreach ($plans->unionAll($addOns)->cursor() as $source) {
             foreach (json_decode($source->entitlements, true, flags: JSON_THROW_ON_ERROR) as $entitlement) {
                 if ($entitlement['type'] === 'feature' && $entitlement['composition'] === 'any') {
                     $features[$entitlement['code']] = true;
                 }
+                if ($entitlement['type'] === 'capacity' && $source->state !== 'Grace Period') {
+                    $code = $entitlement['code'];
+                    $current = $capacities[$code] ?? 0;
+                    $capacities[$code] = match ($entitlement['composition']) {
+                        'additive' => $current + $entitlement['quantity'],
+                        'maximum' => max($current, $entitlement['quantity']),
+                    };
+                }
             }
         }
         ksort($features, SORT_STRING);
 
-        return response()->json(['business_id' => $business, 'feature_codes' => array_keys($features)])
+        ksort($capacities, SORT_STRING);
+
+        return response()->json([
+            'business_id' => $business, 'feature_codes' => array_keys($features),
+            ...($capacities === [] ? [] : ['capacities' => $capacities]),
+        ])
             ->header('Cache-Control', 'no-store');
     }
 

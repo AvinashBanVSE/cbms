@@ -18,6 +18,7 @@ const labels: Record<string, string> = {
 };
 
 interface MappingHistory {
+  mapping_type?: { code: string; name: string };
   data: { id: string; action: string; recorded_at: string }[];
   next_page_url: string | null;
 }
@@ -145,6 +146,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
       </form>
       {history && (
         <>
+          {history.page.mapping_type && <p>Mapping type: {history.page.mapping_type.name}</p>}
           <ol aria-label="Mapping History">
             {history.page.data.map((entry) => (
               <li key={entry.id}>

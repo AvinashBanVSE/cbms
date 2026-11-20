@@ -19,7 +19,10 @@ final class BusinessMappingController
     public function initiate(Request $request, string $shop): JsonResponse
     {
         $actor = $this->access->requirePermission($shop, 'Shop', 'mapping.initiate');
-        $input = $request->validate(['distributor_id' => 'required|uuid']);
+        $input = $request->validate([
+            'distributor_id' => 'required|uuid',
+            'mapping_type' => 'sometimes|required|in:distributor_shop',
+        ]);
         abort_unless(DB::table('business_identities')->where('id', $input['distributor_id'])->where('kind', 'Distributor')->exists(), 422);
 
         return DB::transaction(function () use ($shop, $actor, $input): JsonResponse {
@@ -28,6 +31,7 @@ final class BusinessMappingController
             $secret = bin2hex(random_bytes(16));
             DB::table('distributor_shop_mappings')->insert([
                 'id' => $id, 'shop_id' => $shop, 'distributor_id' => $input['distributor_id'],
+                'mapping_type' => $input['mapping_type'] ?? 'distributor_shop',
                 'state' => 'pending_distributor', ...$this->codeFields($secret),
             ]);
             $this->record($id, $actor, 'initiated');
@@ -99,7 +103,9 @@ final class BusinessMappingController
         abort_unless(in_array($kind, ['Shop', 'Distributor'], true), 403);
         $actor = $this->access->requirePermission($business, $kind, 'mapping.history.view');
         $endpoint = $kind === 'Shop' ? 'shop_id' : 'distributor_id';
-        abort_unless(DB::table('distributor_shop_mappings')->where('id', $mapping)->where($endpoint, $business)->exists(), 404);
+        $type = DB::table('distributor_shop_mappings')->where('id', $mapping)
+            ->where($endpoint, $business)->value('mapping_type');
+        abort_if($type === null, 404);
         $records = DB::table('distributor_shop_mapping_history')->where('mapping_id', $mapping)
             ->orderByDesc('recorded_at')->orderByDesc('id')->simplePaginate(30, ['id', 'action', 'recorded_at']);
         $records->through(static function (object $entry): object {
@@ -113,7 +119,10 @@ final class BusinessMappingController
             'details' => json_encode(['business_id' => $business, 'page' => $records->currentPage()], JSON_THROW_ON_ERROR),
         ]);
 
-        return response()->json($records)->header('Cache-Control', 'no-store');
+        return response()->json([
+            ...$records->toArray(),
+            'mapping_type' => ['code' => $type, ...config('mapping_types')[$type]],
+        ])->header('Cache-Control', 'no-store');
     }
 
     private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): string

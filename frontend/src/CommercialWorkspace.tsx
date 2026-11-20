@@ -26,6 +26,19 @@ const family: Field = {
     ["dealer", "Dealer"],
   ],
 };
+const capacityQuantities: Field = {
+  name: "capacities",
+  label: "Capacity quantities (code=quantity, comma separated)",
+  optional: true,
+};
+const entitlementTypes: Field = {
+  name: "type",
+  label: "Type",
+  options: [
+    ["feature", "Feature"],
+    ["capacity", "Capacity"],
+  ],
+};
 const sections: Record<Section, { label: string; fields: Field[] }> = {
   accounts: {
     label: "Commercial accounts",
@@ -36,10 +49,17 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
     ],
   },
   entitlements: {
-    label: "Feature entitlements",
+    label: "Entitlements",
     fields: [
       { name: "code", label: "Entitlement Code" },
-      { name: "name", label: "Feature name" },
+      { name: "name", label: "Entitlement name" },
+      entitlementTypes,
+      {
+        name: "composition",
+        label: "Capacity composition",
+        optional: true,
+        options: [["", "Select for capacity"], ["additive", "Additive"], ["maximum", "Maximum"]],
+      },
     ],
   },
   plans: {
@@ -51,11 +71,12 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
     ],
   },
   add_ons: {
-    label: "Feature Add-ons",
+    label: "Add-ons",
     fields: [
       { name: "provider_id", label: "Service provider ID" },
       { name: "name", label: "Add-on name" },
       family,
+      entitlementTypes,
     ],
   },
   add_on_versions: {
@@ -70,8 +91,9 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
       },
       {
         name: "entitlements",
-        label: "Feature entitlement codes (comma separated)",
+        label: "Entitlement codes (comma separated)",
       },
+      capacityQuantities,
     ],
   },
   versions: {
@@ -84,11 +106,13 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
         type: "number",
       },
       { name: "term_days", label: "Term in calendar days", type: "number" },
+      { name: "trial_days", label: "Trial duration in calendar days", type: "number", optional: true },
       {
         name: "entitlements",
-        label: "Feature entitlement codes (comma separated)",
+        label: "Entitlement codes (comma separated)",
         optional: true,
       },
+      capacityQuantities,
     ],
   },
   subscriptions: {
@@ -97,6 +121,7 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
       { name: "account_id", label: "Commercial Account ID" },
       { name: "plan_version_id", label: "Tenant Plan Version ID" },
       { name: "starts_on", label: "Starts on (India calendar)", type: "date" },
+      { name: "trial_reason", label: "Trial authorization reason", optional: true },
       {
         name: "coverage_mode",
         label: "Coverage",
@@ -124,6 +149,7 @@ interface Listing {
 interface AvailableFeatures {
   business_id: string;
   feature_codes: string[];
+  capacities?: Record<string, number>;
 }
 
 const subscriptionActions: Record<string, [string, string][]> = {
@@ -131,6 +157,7 @@ const subscriptionActions: Record<string, [string, string][]> = {
     ["activate", "Activate"],
     ["cancel", "Cancel immediately"],
   ],
+  Trial: [["cancel", "Cancel immediately"]],
   Active: [
     ["suspend", "Suspend"],
     ["cancel", "Cancel immediately"],
@@ -181,7 +208,7 @@ export function CommercialWorkspace() {
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
-    const body: Record<string, string | string[]> = Object.fromEntries(
+    const body: Record<string, string | string[] | Record<string, string>> = Object.fromEntries(
       Array.from(fields.entries(), ([name, value]) => [
         name,
         String(value).trim(),
@@ -204,7 +231,24 @@ export function CommercialWorkspace() {
         "/versions";
       delete body[idField];
       body.entitlements = split(body.entitlements);
+      const quantities = split(body.capacities);
+      delete body.capacities;
+      if (quantities.length > 0) {
+        const pairs = quantities.map((entry) => entry.split("=").map((part) => part.trim()));
+        const codes = new Set(pairs.map(([code]) => code));
+        if (codes.size !== pairs.length || pairs.some(([code, quantity, extra]) =>
+          !code || !quantity || !/^[0-9]+$/.test(quantity) || extra !== undefined
+        )) {
+          setNotice("Enter a distinct entitlement code and whole-number quantity for each capacity.");
+          return;
+        }
+        body.capacities = Object.fromEntries(pairs);
+      }
     }
+    if (body.type === "feature") delete body.type;
+    if (!body.composition) delete body.composition;
+    if (!body.trial_days) delete body.trial_days;
+    if (!body.trial_reason) delete body.trial_reason;
     if (section === "subscriptions") {
       body.renewal_mode = renewalMode;
       body.business_ids = split(body.business_ids);
@@ -571,6 +615,16 @@ export function CommercialWorkspace() {
                 </ul>
               ) : (
                 <p>No features are currently available.</p>
+              )}
+              {features.capacities && (
+                <dl aria-label="Available capacity">
+                  {Object.entries(features.capacities).map(([code, quantity]) => (
+                    <div key={code}>
+                      <dt>{code}</dt>
+                      <dd>{quantity}</dd>
+                    </div>
+                  ))}
+                </dl>
               )}
             </section>
           )}

@@ -8,6 +8,7 @@ use App\Authorization\MainPortalAccess;
 use App\Configuration\GlobalBusinessSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 final class GlobalBusinessSettingsController
@@ -24,6 +25,28 @@ final class GlobalBusinessSettingsController
                 'address_fields' => GlobalBusinessSettings::ADDRESS_FIELDS,
             ],
         ])->header('Cache-Control', 'no-store');
+    }
+
+    public function validatePin(Request $request, MainPortalAccess $access): JsonResponse
+    {
+        $access->requirePermission('global_business_settings.view');
+        $input = $request->validate(['pin_code' => 'required|string|regex:/^[0-9]{6}$/D']);
+
+        return response()->json(['pin_code' => $input['pin_code'], 'validation' => 'format'])
+            ->header('Cache-Control', 'no-store');
+    }
+
+    public function postalLocations(Request $request, MainPortalAccess $access): JsonResponse
+    {
+        $access->requirePermission('global_business_settings.view');
+        $input = $request->validate(['pin_code' => 'required|string|regex:/^[0-9]{6}$/D']);
+        abort_unless(DB::table('postal_reference_entries')->exists(), 503, 'Postal reference data is unavailable.');
+
+        $entries = DB::table('postal_reference_entries')->where('pin_code', $input['pin_code'])
+            ->orderBy('state_or_union_territory')->orderBy('district')->orderBy('office')
+            ->get(['office', 'district', 'state_or_union_territory']);
+
+        return response()->json(['pin_code' => $input['pin_code'], 'data' => $entries])->header('Cache-Control', 'no-store');
     }
 
     public function convert(Request $request, MainPortalAccess $access): JsonResponse

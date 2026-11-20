@@ -49,7 +49,7 @@ final class CommercialBillingController
                 return response()->json($this->balance($prior, $this->paid($prior->id)));
             }
             abort_if($data['due_on'] < $today, 422, 'The payment due date must be today or later.');
-            abort_unless(in_array($subscription->state, ['Pending Activation', 'Trial', 'Active'], true), 409);
+            abort_unless(in_array($subscription->state, ['Pending Activation', 'Active'], true), 409);
             $invoice = SubscriptionTerms::issueInvoice($subscription, $today, $data['due_on'], Auth::id());
 
             return response()->json($this->balance($invoice, 0), 201);
@@ -63,7 +63,8 @@ final class CommercialBillingController
         $history = DB::table('commercial_billing_ledger as entry')
             ->join('commercial_payments as payment', 'payment.id', '=', 'entry.payment_id')
             ->where('entry.invoice_id', $invoice)->orderBy('entry.id')->simplePaginate(30, [
-                'entry.id', 'entry.payment_id', 'entry.entry_type', 'entry.delta_paise', 'entry.recorded_at', 'payment.receipt_reference',
+                'entry.id', 'entry.payment_id', 'entry.entry_type', 'entry.delta_paise', 'entry.reason',
+                'entry.recorded_at', 'payment.receipt_reference',
             ]);
         $history->through(static function (object $entry): object {
             $entry->recorded_at = CarbonImmutable::parse($entry->recorded_at, 'UTC')->utc()->toISOString();
