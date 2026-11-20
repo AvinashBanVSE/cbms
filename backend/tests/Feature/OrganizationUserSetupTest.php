@@ -373,6 +373,70 @@ final class OrganizationUserSetupTest extends TestCase
         $this->assertDatabaseHas('portal_events', ['action' => 'organization_user.state_changed', 'subject_id' => $operator]);
     }
 
+    public function test_organization_onboarding_requires_root_scope_and_cannot_cross_tenants_or_create_peers(): void
+    {
+        [$tenant, $shop, $administrator] = $this->fixture();
+        [$otherTenant, $otherShop] = $this->fixtureForOtherOrganization();
+        $organization = DB::table('customer_tenants')->where('id', $tenant)->value('organization_id');
+        $path = "/api/v1/tenants/{$tenant}";
+        $transport = new ArrayTransport;
+        Mail::extend('memory-test', static fn () => $transport);
+        config(['mail.default' => 'memory-test', 'mail.mailers.memory-test.transport' => 'memory-test']);
+        $this->actingAs($administrator);
+        $this->postJson($path.'/credential-policy', ['mode' => 'otp'])->assertOk();
+        $root = ['email' => 'root@example.test', 'business_id' => $organization, 'actions' => ['organization_users.provision']];
+        $code = $this->postJson($path.'/organization-users', $root)->assertCreated()->json('user_code');
+        preg_match('/One-time code: (\d{6})/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $otp);
+        $peer = $this->postJson($path.'/organization-users', [...$root, 'email' => 'peer@example.test'])->assertCreated()->json('user_code');
+        $this->postJson('/api/v1/logout')->assertNoContent();
+        $this->postJson('/api/v1/organization-setup/verify', ['code' => $code, 'otp' => $otp[1]])->assertOk();
+        $this->mock(UncompromisedVerifier::class)->shouldReceive('verify')->andReturn(true);
+        $password = 'new-test-only-organization-admin-password';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $password, 'password_confirmation' => $password])->assertOk();
+        $this->postJson('/api/v1/login', ['code' => $code, 'email' => $root['email'], 'password' => $password])->assertNoContent();
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('administration', [])
+            ->assertJsonPath('organization_onboarding.tenant_id', $tenant);
+        $this->getJson($path.'/credential-policy')->assertOk()->assertJsonPath('mode', 'otp');
+        $this->postJson($path.'/credential-policy', ['mode' => 'both'])->assertForbidden();
+        $this->getJson("/api/v1/tenants/{$otherTenant}/credential-policy")->assertForbidden();
+        $this->postJson($path.'/organization-users', [...$root, 'email' => 'peer2@example.test'])->assertForbidden();
+        $this->postJson($path.'/organization-users/reissue', ['code' => $peer])->assertForbidden();
+        $employee = ['email' => 'staff@example.test', 'actions' => ['mapping.initiate']];
+        $this->postJson("/api/v1/tenants/{$otherTenant}/organization-users", [...$employee, 'business_id' => $otherShop])->assertForbidden();
+        $this->postJson($path.'/organization-users', [...$employee, 'business_id' => $otherShop])->assertUnprocessable();
+        $staff = $this->postJson($path.'/organization-users', [...$employee, 'business_id' => $shop])->assertCreated()->json('user_code');
+        $this->travel(1)->minute();
+        $this->postJson($path.'/organization-users/reissue', ['code' => $staff])->assertOk();
+        $user = DB::table('users')->where('code', $code)->value('id');
+        DB::table('customer_business_scopes')->where(['user_id' => $user, 'business_id' => $organization])->delete();
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonMissingPath('organization_onboarding');
+        $this->postJson($path.'/organization-users/reissue', ['code' => $staff])->assertForbidden();
+        $this->postJson($path.'/organization-users/revoke-onboarding', ['code' => $code])->assertForbidden();
+        DB::table('customer_business_scopes')->insert(['user_id' => $user, 'business_id' => $organization]);
+        $this->actingAs($administrator);
+        $this->postJson("/api/v1/tenants/{$otherTenant}/organization-users/revoke-onboarding", ['code' => $code])->assertNotFound();
+        $this->postJson($path.'/organization-users/revoke-onboarding', ['code' => $code])->assertOk()->assertJsonPath('status', 'revoked');
+        $this->assertDatabaseHas('portal_events', ['action' => 'organization_user.onboarding_authority_revoked', 'subject_id' => $user]);
+        $this->assertDatabaseHas('customer_accounts', ['user_id' => $user, 'state' => 'Active']);
+        $this->actingAs(User::findOrFail($user));
+        $this->getJson($path.'/credential-policy')->assertForbidden();
+    }
+
+    private function fixtureForOtherOrganization(): array
+    {
+        $organization = Str::uuid7()->toString();
+        $shop = Str::uuid7()->toString();
+        $tenant = Str::uuid7()->toString();
+        DB::table('business_identities')->insert(['id' => $organization, 'kind' => 'Organization', 'professional_name' => 'Other Organization']);
+        DB::table('business_identities')->insert(['id' => $shop, 'kind' => 'Shop', 'professional_name' => 'Other Shop', 'parent_id' => $organization]);
+        DB::table('customer_tenants')->insert([
+            'id' => $tenant, 'organization_id' => $organization,
+            'provider_id' => DB::table('portal_installation')->where('id', 1)->value('portal_id'),
+        ]);
+
+        return [$tenant, $shop];
+    }
+
     private function fixture(): array
     {
         $id = static fn (): string => Str::uuid7()->toString();

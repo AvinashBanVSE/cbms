@@ -161,7 +161,7 @@ export function OrganizationAccess() {
   );
 }
 
-export function OrganizationUsers() {
+export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -170,12 +170,15 @@ export function OrganizationUsers() {
     const form = event.currentTarget;
     const operation = form.dataset.operation;
     const fields = new FormData(form);
-    const tenant = encodeURIComponent(String(fields.get("tenant")).trim());
+    const tenant = encodeURIComponent(
+      tenantId ?? String(fields.get("tenant")).trim(),
+    );
     const base = "tenants/" + tenant;
     const policy = operation === "policy";
     const lookup = operation === "lookup";
     const provider = operation === "provider";
     const reissue = operation === "reissue";
+    const revoke = operation === "revoke-onboarding";
     setBusy(true);
     setNotice("");
     try {
@@ -188,12 +191,14 @@ export function OrganizationUsers() {
             ? "/credential-policy"
             : reissue
               ? "/organization-users/reissue"
-              : "/organization-users");
+              : revoke
+                ? "/organization-users/revoke-onboarding"
+                : "/organization-users");
       const body: Record<string, string | string[]> | undefined = lookup
         ? undefined
         : policy || provider
           ? { mode: String(fields.get("mode")) }
-          : reissue
+          : reissue || revoke
             ? { code: String(fields.get("code")) }
             : {
                 email: String(fields.get("email")),
@@ -203,6 +208,8 @@ export function OrganizationUsers() {
       const result = await (await portalRequest(endpoint, body)).json();
       if (provider) {
         setNotice("Service provider default saved.");
+      } else if (revoke) {
+        setNotice("Organization onboarding permission revoked.");
       } else if (policy || lookup) {
         const effective =
           result.mode && result.source
@@ -232,70 +239,80 @@ export function OrganizationUsers() {
   return (
     <>
       <p role="status">{notice}</p>
-      <details>
-        <summary>Service provider credential default</summary>
-        <form data-operation="provider" onSubmit={submit}>
-          <label>
-            Main Portal or Sub-Portal ID
-            <input name="provider" required />
-          </label>
-          <label>
-            Default setup method
-            <select name="mode" required>
-              {Object.entries(methods).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button disabled={busy}>Save provider default</button>
-        </form>
-      </details>
+      {!tenantId && (
+        <details>
+          <summary>Service provider credential default</summary>
+          <form data-operation="provider" onSubmit={submit}>
+            <label>
+              Main Portal or Sub-Portal ID
+              <input name="provider" required />
+            </label>
+            <label>
+              Default setup method
+              <select name="mode" required>
+                {Object.entries(methods).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button disabled={busy}>Save provider default</button>
+          </form>
+        </details>
+      )}
       <details>
         <summary>Check effective Organization policy</summary>
         <form data-operation="lookup" onSubmit={submit}>
-          <label>
-            Organization Tenant ID
-            <input name="tenant" required />
-          </label>
+          {!tenantId && (
+            <label>
+              Organization Tenant ID
+              <input name="tenant" required />
+            </label>
+          )}
           <button disabled={busy}>Check policy</button>
         </form>
       </details>
-      <details>
-        <summary>Credential setup policy</summary>
-        <form data-operation="policy" onSubmit={submit}>
-          <label>
-            Organization Tenant ID
-            <input name="tenant" required />
-          </label>
-          <label>
-            Setup method
-            <select name="mode" required>
-              <option value="inherit">Inherit service provider policy</option>
-              {Object.entries(methods).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button disabled={busy}>Save policy</button>
-        </form>
-      </details>
+      {!tenantId && (
+        <details>
+          <summary>Credential setup policy</summary>
+          <form data-operation="policy" onSubmit={submit}>
+            <label>
+              Organization Tenant ID
+              <input name="tenant" required />
+            </label>
+            <label>
+              Setup method
+              <select name="mode" required>
+                <option value="inherit">Inherit service provider policy</option>
+                {Object.entries(methods).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button disabled={busy}>Save policy</button>
+          </form>
+        </details>
+      )}
       <details>
         <summary>Create authorized user</summary>
         <form onSubmit={submit}>
-          <label>
-            Organization Tenant ID
-            <input name="tenant" required />
-          </label>
+          {!tenantId && (
+            <label>
+              Organization Tenant ID
+              <input name="tenant" required />
+            </label>
+          )}
           <label>
             User email
             <input name="email" type="email" required />
           </label>
           <label>
-            Shop or Distributor ID
+            {tenantId
+              ? "Shop or Distributor ID"
+              : "Organization, Shop or Distributor ID"}
             <input name="business_id" required />
           </label>
           <fieldset>
@@ -306,6 +323,16 @@ export function OrganizationUsers() {
                 {label}
               </label>
             ))}
+            {!tenantId && (
+              <label>
+                <input
+                  name="actions"
+                  type="checkbox"
+                  value="organization_users.provision"
+                />
+                Provision users in this Organization
+              </label>
+            )}
           </fieldset>
           <button disabled={busy}>Create user</button>
         </form>
@@ -313,10 +340,12 @@ export function OrganizationUsers() {
       <details>
         <summary>Reissue setup credentials</summary>
         <form data-operation="reissue" onSubmit={submit}>
-          <label>
-            Organization Tenant ID
-            <input name="tenant" required />
-          </label>
+          {!tenantId && (
+            <label>
+              Organization Tenant ID
+              <input name="tenant" required />
+            </label>
+          )}
           <label>
             User Code
             <input name="code" pattern="[A-Z]{2}[0-9]{4}" required />
@@ -324,10 +353,28 @@ export function OrganizationUsers() {
           <button disabled={busy}>Reissue credentials</button>
         </form>
       </details>
-      <OrganizationAccess />
-      <OrganizationAccountLifecycle />
-      <OrganizationDelegations />
-      <OrganizationRoles actions={actions} />
+      {!tenantId && (
+        <>
+          <details>
+            <summary>Revoke Organization onboarding permission</summary>
+            <form data-operation="revoke-onboarding" onSubmit={submit}>
+              <label>
+                Organization Tenant ID
+                <input name="tenant" required />
+              </label>
+              <label>
+                User Code
+                <input name="code" pattern="[A-Z]{2}[0-9]{4}" required />
+              </label>
+              <button disabled={busy}>Revoke onboarding permission</button>
+            </form>
+          </details>
+          <OrganizationAccess />
+          <OrganizationAccountLifecycle />
+          <OrganizationDelegations />
+          <OrganizationRoles actions={actions} />
+        </>
+      )}
     </>
   );
 }

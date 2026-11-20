@@ -49,6 +49,7 @@ interface WorkspaceAccess {
   administration: AdministrationSection[];
   mapping_contexts: MappingContext[];
   delegations: ActiveAccessDelegation[];
+  organization_onboarding?: { tenant_id: string; professional_name: string };
 }
 
 const appearanceOptions = {
@@ -242,6 +243,17 @@ export function Portal() {
             {mappingContexts.length > 0 && (
               <MappingWorkspace contexts={mappingContexts} />
             )}
+            {workspace.organization_onboarding && (
+              <section aria-label="Organization onboarding">
+                <h2>
+                  {workspace.organization_onboarding.professional_name} · User
+                  onboarding
+                </h2>
+                <OrganizationUsers
+                  tenantId={workspace.organization_onboarding.tenant_id}
+                />
+              </section>
+            )}
             {section && (
               <div className="workspace" data-navigation={navigation}>
                 <nav aria-label="Administration">
@@ -273,9 +285,12 @@ export function Portal() {
                 </section>
               </div>
             )}
-            {!section && !mappingContexts.length && !delegations.length && (
-              <p>No workspace is assigned to this account.</p>
-            )}
+            {!section &&
+              !mappingContexts.length &&
+              !delegations.length &&
+              !workspace.organization_onboarding && (
+                <p>No workspace is assigned to this account.</p>
+              )}
             <button
               onClick={async () => {
                 try {

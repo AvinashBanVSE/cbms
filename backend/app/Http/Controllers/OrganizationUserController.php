@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
 use App\Authorization\MappingPermissions;
+use App\Authorization\OrganizationOnboardingAccess;
 use App\Configuration\OrganizationCredentialPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,11 +24,12 @@ final class OrganizationUserController
     public function __construct(
         private readonly MainPortalAccess $access,
         private readonly OrganizationCredentialPolicy $policy,
+        private readonly OrganizationOnboardingAccess $onboarding,
     ) {}
 
     public function effectivePolicy(string $tenant): JsonResponse
     {
-        $this->access->requirePermission('organization_users.manage');
+        $this->onboarding->requireFor($tenant);
 
         return response()->json($this->policy->resolve($tenant))->header('Cache-Control', 'no-store');
     }
@@ -70,25 +72,35 @@ final class OrganizationUserController
 
     public function store(Request $request, string $tenant): JsonResponse
     {
-        $this->access->requirePermission('organization_users.manage');
-        $organization = DB::table('customer_tenants')->where('id', $tenant)->value('organization_id');
-        abort_if($organization === null, 404);
+        $this->onboarding->requireFor($tenant);
         $input = $request->validate([
             'email' => 'required|email|max:254',
             'business_id' => 'required|uuid',
             'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
             'actions.*' => 'required|string|distinct',
         ]);
-        $business = DB::table('business_identities')->where('id', $input['business_id'])->where('parent_id', $organization)->value('kind');
-        MappingPermissions::validate($business, $input['actions']);
-        $mode = $this->policy->resolve($tenant)['mode'];
-        abort_if($mode === null, 409, 'Configure an applicable credential setup policy first.');
-        $this->requireDeliverableMailer();
-
         $id = Str::uuid7()->toString();
-        $code = DB::transaction(function () use ($id, $input, $tenant, $mode): string {
+        $code = DB::transaction(function () use ($id, $input, $tenant): string {
             // Serializes allocation against other registrations, including a concurrent retry.
             DB::table('portal_installation')->where('id', 1)->lockForUpdate()->first();
+            $mainPortal = $this->onboarding->requireFor($tenant, lock: true);
+            $organization = DB::table('customer_tenants')->where('id', $tenant)->lockForUpdate()->value('organization_id');
+            abort_if($organization === null, 404);
+            if ($input['business_id'] === $organization) {
+                abort_unless($mainPortal, 403);
+                abort_unless(DB::table('business_identities')->where(['id' => $organization, 'kind' => 'Organization'])
+                    ->where('operational_state', '!=', 'Closed')->lockForUpdate()->first(['id']) !== null, 422);
+                if ($input['actions'] !== [OrganizationOnboardingAccess::PERMISSION]) {
+                    throw ValidationException::withMessages(['actions' => 'Select the Organization onboarding permission for an Organization-level account.']);
+                }
+            } else {
+                $business = DB::table('business_identities')->where('id', $input['business_id'])
+                    ->where('parent_id', $organization)->where('operational_state', '!=', 'Closed')->lockForUpdate()->value('kind');
+                MappingPermissions::validate($business, $input['actions']);
+            }
+            $mode = $this->policy->resolve($tenant)['mode'];
+            abort_if($mode === null, 409, 'Configure an applicable credential setup policy first.');
+            $this->requireDeliverableMailer();
             $email = Str::lower($input['email']);
             if (DB::table('users')->join('customer_accounts', 'users.id', '=', 'customer_accounts.user_id')
                 ->where('tenant_id', $tenant)->whereRaw('LOWER(email) = ?', [$email])->exists()) {
@@ -113,7 +125,7 @@ final class OrganizationUserController
             $this->record($id, 'organization_user.provisioned');
 
             return $code;
-        });
+        }, attempts: 3);
         $sent = $this->issue($tenant, $code);
 
         return response()->json(['user_code' => $code, 'delivery' => $sent ? 'sent' : 'failed'], 201);
@@ -121,12 +133,34 @@ final class OrganizationUserController
 
     public function reissue(Request $request, string $tenant): JsonResponse
     {
-        $this->access->requirePermission('organization_users.manage');
+        $this->onboarding->requireFor($tenant);
         $input = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
         $this->requireDeliverableMailer();
         $sent = $this->issue($tenant, $input['code']);
 
         return response()->json(['delivery' => $sent ? 'sent' : 'failed']);
+    }
+
+    public function revokeOnboarding(Request $request, string $tenant): JsonResponse
+    {
+        $this->access->requirePermission('organization_users.manage');
+        $data = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
+        DB::transaction(function () use ($tenant, $data): void {
+            $context = DB::table('customer_accounts as account')
+                ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
+                ->join('users', 'users.id', '=', 'account.user_id')
+                ->where('account.tenant_id', $tenant)->where('users.code', $data['code'])->lockForUpdate()
+                ->first(['account.user_id', 'tenant.organization_id']);
+            abort_if($context === null, 404);
+            $removed = DB::table('customer_permissions')->where([
+                'user_id' => $context->user_id, 'business_id' => $context->organization_id,
+                'action' => OrganizationOnboardingAccess::PERMISSION,
+            ])->delete();
+            abort_unless($removed === 1, 404);
+            $this->record($context->user_id, 'organization_user.onboarding_authority_revoked');
+        }, attempts: 3);
+
+        return response()->json(['status' => 'revoked']);
     }
 
     private function requireDeliverableMailer(): void
@@ -138,10 +172,15 @@ final class OrganizationUserController
     private function issue(string $tenant, string $code): bool
     {
         $credentials = DB::transaction(function () use ($tenant, $code): array {
+            $mainPortal = $this->onboarding->requireFor($tenant, lock: true);
             $account = DB::table('customer_accounts')->join('users', 'users.id', '=', 'customer_accounts.user_id')
                 ->where('tenant_id', $tenant)->where('state', 'Pending Verification')->where('code', $code)
                 ->select('users.id', 'users.email')->lockForUpdate()->first();
             abort_if($account === null, 404);
+            if (! $mainPortal) {
+                abort_if(DB::table('customer_permissions')->where('user_id', $account->id)
+                    ->where('action', OrganizationOnboardingAccess::PERMISSION)->exists(), 403);
+            }
             $setup = DB::table('organization_user_setups')->where('user_id', $account->id);
             $previous = $setup->first();
             abort_if($previous === null, 409);

@@ -78,6 +78,7 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('tenants/{tenant}/credential-policy', [OrganizationUserController::class, 'configure'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/organization-users', [OrganizationUserController::class, 'store'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/organization-users/reissue', [OrganizationUserController::class, 'reissue'])->whereUuid('tenant')->middleware('throttle:5,1,organization-reissue');
+    Route::post('tenants/{tenant}/organization-users/revoke-onboarding', [OrganizationUserController::class, 'revokeOnboarding'])->whereUuid('tenant');
     Route::post('organization-setup/verify', [OrganizationCredentialController::class, 'verify'])->middleware('throttle:organization-verify');
     Route::post('organization-setup/complete', [OrganizationCredentialController::class, 'complete'])->middleware('throttle:5,1,organization-complete');
     Route::get('mapping-contexts', fn (CustomerBusinessAccess $access) => response()->json($access->mappingContexts())->header('Cache-Control', 'no-store'));

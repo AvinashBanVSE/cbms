@@ -251,6 +251,50 @@ it("opens only the assigned workspace without service catalogue access", async (
   expect(document.querySelector("h1")?.textContent).toBe("Sign in");
 });
 
+it("binds Organization onboarding to the authenticated tenant", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") {
+      return json({
+        ...adminWorkspace,
+        administration: [],
+        organization_onboarding: {
+          tenant_id: "my-tenant",
+          professional_name: "My Organization",
+        },
+      });
+    }
+    if (path === "tenants/my-tenant/organization-users") {
+      expect(body).toEqual({
+        email: "staff@example.test",
+        business_id: "shop",
+        actions: ["mapping.initiate"],
+      });
+      return json({ user_code: "AA3000", delivery: "sent" });
+    }
+    throw new Error(path);
+  });
+  await render();
+  const workspace = document.querySelector(
+    '[aria-label="Organization onboarding"]',
+  )!;
+  expect(workspace.textContent).toContain("My Organization");
+  expect(workspace.querySelector('input[name="tenant"]')).toBeNull();
+  expect(
+    workspace.querySelector('input[value="organization_users.provision"]'),
+  ).toBeNull();
+  expect(workspace.querySelector('form[data-operation="policy"]')).toBeNull();
+  input("email", "staff@example.test");
+  input("business_id", "shop");
+  workspace.querySelector<HTMLInputElement>(
+    'input[value="mapping.initiate"]',
+  )!.checked = true;
+  await submit(
+    '[aria-label="Organization onboarding"] form:not([data-operation])',
+  );
+  expect(workspace.textContent).toContain("User Code: AA3000");
+});
+
 it("keeps sign out available for an authenticated account without assignments", async () => {
   request.mockImplementation(async (path) => {
     if (path === "installation") return json({ stage: "ready" });
@@ -563,6 +607,9 @@ it("configures account setup and provisions an authorized Organization user", as
       case "tenants/tenant/organization-users/reissue":
         if (body?.code === "AB1235") throw new Error("User unavailable");
         return json({ delivery: "sent" });
+      case "tenants/tenant/organization-users/revoke-onboarding":
+        expect(body).toEqual({ code: "AB1234" });
+        return json({ status: "revoked" });
       default:
         throw new Error(path);
     }
@@ -616,6 +663,13 @@ it("configures account setup and provisions an authorized Organization user", as
   fillIn(resend, "code", "AB1235");
   await submit(resend);
   expect(document.body.textContent).toContain("User unavailable");
+  const revoke = 'form[data-operation="revoke-onboarding"]';
+  fillIn(revoke, "tenant", "tenant");
+  fillIn(revoke, "code", "AB1234");
+  await submit(revoke);
+  expect(document.body.textContent).toContain(
+    "Organization onboarding permission revoked.",
+  );
 });
 
 it("sets a permanent password through the separate restricted setup screen", async () => {
