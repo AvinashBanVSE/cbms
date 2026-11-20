@@ -68,6 +68,9 @@ final class PortalBootstrapTest extends TestCase
                 'address_fields' => ['locality', 'district', 'state_or_union_territory', 'pin_code'],
             ],
         ]);
+        $conversion = '/api/v1/global-business-settings/unit-conversion';
+        $this->getJson($conversion.'?quantity=2&from=kg&to=g')->assertOk()->assertExactJson(['quantity' => 2000, 'unit' => 'g']);
+        $this->getJson($conversion.'?quantity=2&from=kg&to=m')->assertUnprocessable()->assertJsonValidationErrors('to');
         $this->postJson('/api/v1/global-business-settings', ['currency' => 'USD'])->assertMethodNotAllowed();
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped', 'Business-context-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');

@@ -61,6 +61,7 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('providers/{provider}/users/recover', [AccountRecoveryController::class, 'provider'])->whereUuid('provider')
         ->middleware('throttle:10,1,provider-password-recovery');
     Route::get('global-business-settings', GlobalBusinessSettingsController::class);
+    Route::get('global-business-settings/unit-conversion', [GlobalBusinessSettingsController::class, 'convert']);
     Route::get('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'show'])->whereUuid('business');
     Route::post('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'update'])->whereUuid('business');
     Route::post('global-business-settings/time-presentation/{business}/access', [BusinessTimePresentationController::class, 'setOrganizationAccess'])->whereUuid('business');

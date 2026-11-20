@@ -25,11 +25,12 @@ final class GlobalBusinessSettings
         'financial_year_end' => '03-31',
     ];
 
-    public const REFERENCE_UNITS = [
-        'mass' => ['kg', 'g', 't'],
-        'length' => ['m', 'cm', 'mm'],
-        'volume' => ['L', 'mL'],
-        'area' => ['m²', 'ft²', 'acre'],
+    // Factors express each unit in the metric base unit for its dimension.
+    public const UNIT_FACTORS = [
+        'mass' => ['kg' => 1, 'g' => 0.001, 't' => 1000],
+        'length' => ['m' => 1, 'cm' => 0.01, 'mm' => 0.001],
+        'volume' => ['L' => 1, 'mL' => 0.001],
+        'area' => ['m²' => 1, 'ft²' => 0.09290304, 'acre' => 4046.8564224],
     ];
 
     public const ADDRESS_FIELDS = ['locality', 'district', 'state_or_union_territory', 'pin_code'];
