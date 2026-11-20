@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CommercialWorkspace } from "./CommercialWorkspace";
+import { AuditTrail } from "./AuditTrail";
 import { portalRequest, PortalRequestError } from "./api";
 import "./portal.css";
 import { type ActiveAccessDelegation } from "./OrganizationDelegations";
@@ -34,6 +35,21 @@ const titles = {
   owner_required: "Create owner account",
   ready: "Sign in",
 };
+
+const administration = {
+  services: ["Services", "Service catalogue"],
+  businesses: ["Businesses", "Business structure"],
+  users: ["Organization users", "Organization users"],
+  commercial: ["Commercial", "Commercial management"],
+  audit: ["Audit Trail", "Audit Trail"],
+} as const;
+type AdministrationSection = keyof typeof administration;
+
+interface WorkspaceAccess {
+  administration: AdministrationSection[];
+  mapping_contexts: MappingContext[];
+  delegations: ActiveAccessDelegation[];
+}
 
 const appearanceOptions = {
   theme: [
@@ -84,9 +100,8 @@ function loadAppearance(): Appearance {
 }
 
 export function Portal() {
-  const [delegations, setDelegations] = useState<ActiveAccessDelegation[]>([]);
-  const [mappingContexts, setMappingContexts] = useState<MappingContext[]>([]);
-  const [section, setSection] = useState("services");
+  const [workspace, setWorkspace] = useState<WorkspaceAccess>();
+  const [section, setSection] = useState<AdministrationSection>();
   const [setupAccount, setSetupAccount] = useState(false);
   const [stage, setStage] = useState<Stage>();
   const [categories, setCategories] = useState<Record<string, string>>();
@@ -105,34 +120,28 @@ export function Portal() {
     }
   }
 
-  async function loadCatalogue() {
-    try {
+  async function loadWorkspace() {
+    const access: WorkspaceAccess = await (
+      await portalRequest("workspace-access")
+    ).json();
+    setWorkspace(access);
+    setSection(access.administration[0]);
+    if (access.administration.includes("services")) {
       setCategories(await (await portalRequest("services/categories")).json());
-    } catch (error) {
-      if (!(error instanceof PortalRequestError) || error.status !== 403)
-        throw error;
-      const contexts: MappingContext[] = await (
-        await portalRequest("mapping-contexts")
-      ).json();
-      const active: ActiveAccessDelegation[] = await (
-        await portalRequest("organization-access-delegations")
-      ).json();
-      if (!contexts.length && !active.length) throw error;
-      setMappingContexts(contexts);
-      setDelegations(active);
     }
   }
+
   useEffect(() => {
     portalRequest("installation")
       .then((r) => r.json())
       .then(async (data) => {
         setStage(installationStage(data.stage));
-        if (data.stage === "ready") {
-          try {
-            await loadCatalogue();
-          } catch {
-            /* A fresh browser must sign in. */
-          }
+        if (data.stage !== "ready") return;
+        try {
+          await loadWorkspace();
+        } catch (error) {
+          if (!(error instanceof PortalRequestError) || error.status !== 401)
+            setNotice("Workspace unavailable. Reload to retry.");
         }
       })
       .catch(() =>
@@ -151,7 +160,7 @@ export function Portal() {
     try {
       if (stage === "ready") {
         await portalRequest("login", body);
-        await loadCatalogue();
+        await loadWorkspace();
       } else {
         const path = stage === "setup_required" ? "setup" : "owner";
         const result = await (
@@ -167,6 +176,22 @@ export function Portal() {
       setBusy(false);
     }
   }
+  const mappingContexts = workspace?.mapping_contexts ?? [];
+  const delegations = workspace?.delegations ?? [];
+  const title = section
+    ? administration[section][1]
+    : mappingContexts.length
+      ? "Distributor–Shop mappings"
+      : delegations.length
+        ? "Delegated business access"
+        : workspace
+          ? "Your workspace"
+          : stage
+            ? setupAccount
+              ? "Set up account"
+              : titles[stage]
+            : "Portal setup";
+
   return (
     <div className="portal" data-theme={theme} style={{ fontFamily: font }}>
       <header className="portal-header">
@@ -196,27 +221,9 @@ export function Portal() {
         </details>
       </header>
       <section className={layout}>
-        <h1>
-          {mappingContexts.length
-            ? "Distributor–Shop mappings"
-            : delegations.length
-              ? "Delegated business access"
-              : categories
-                ? section === "businesses"
-                  ? "Business structure"
-                  : section === "users"
-                    ? "Organization users"
-                    : section === "commercial"
-                      ? "Commercial management"
-                      : "Service catalogue"
-                : stage
-                  ? setupAccount
-                    ? "Set up account"
-                    : titles[stage]
-                  : "Portal setup"}
-        </h1>
+        <h1>{title}</h1>
         <p role="status">{notice}</p>
-        {categories || mappingContexts.length || delegations.length ? (
+        {workspace ? (
           <>
             {delegations.length > 0 && (
               <section aria-label="Active delegations">
@@ -232,62 +239,50 @@ export function Portal() {
                 <OrganizationAccess />
               </section>
             )}
-            {mappingContexts.length ? (
+            {mappingContexts.length > 0 && (
               <MappingWorkspace contexts={mappingContexts} />
-            ) : (
-              categories && (
-                <div className="workspace" data-navigation={navigation}>
-                  <nav aria-label="Administration">
+            )}
+            {section && (
+              <div className="workspace" data-navigation={navigation}>
+                <nav aria-label="Administration">
+                  {workspace.administration.map((item) => (
                     <button
-                      aria-pressed={section === "services"}
-                      onClick={() => setSection("services")}
+                      key={item}
+                      aria-pressed={section === item}
+                      onClick={() => setSection(item)}
                     >
-                      Services
+                      {administration[item][0]}
                     </button>
-                    <button
-                      aria-pressed={section === "businesses"}
-                      onClick={() => setSection("businesses")}
-                    >
-                      Businesses
-                    </button>
-                    <button
-                      aria-pressed={section === "users"}
-                      onClick={() => setSection("users")}
-                    >
-                      Organization users
-                    </button>
-                    <button
-                      aria-pressed={section === "commercial"}
-                      onClick={() => setSection("commercial")}
-                    >
-                      Commercial
-                    </button>
-                  </nav>
-                  <section
-                    className="workspace-content"
-                    aria-label="Administration workspace"
-                  >
-                    {section === "commercial" ? (
-                      <CommercialWorkspace />
-                    ) : section === "users" ? (
-                      <OrganizationUsers />
-                    ) : section === "businesses" ? (
-                      <BusinessDirectory />
-                    ) : (
-                      <ServiceRegistry categories={categories} />
-                    )}
-                  </section>
-                </div>
-              )
+                  ))}
+                </nav>
+                <section
+                  className="workspace-content"
+                  aria-label="Administration workspace"
+                >
+                  {section === "commercial" ? (
+                    <CommercialWorkspace />
+                  ) : section === "audit" ? (
+                    <AuditTrail />
+                  ) : section === "users" ? (
+                    <OrganizationUsers />
+                  ) : section === "businesses" ? (
+                    <BusinessDirectory />
+                  ) : (
+                    categories && <ServiceRegistry categories={categories} />
+                  )}
+                </section>
+              </div>
+            )}
+            {!section && !mappingContexts.length && !delegations.length && (
+              <p>No workspace is assigned to this account.</p>
             )}
             <button
               onClick={async () => {
                 try {
                   await portalRequest("logout", {});
                   setCategories(undefined);
-                  setMappingContexts([]);
-                  setDelegations([]);
-                  setSection("services");
+                  setWorkspace(undefined);
+                  setSection(undefined);
                   setNotice("");
                 } catch (e) {
                   setNotice((e as Error).message);

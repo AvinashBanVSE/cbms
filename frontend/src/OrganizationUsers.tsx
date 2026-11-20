@@ -21,6 +21,7 @@ const actions = [
   ["mapping.confirm", "Confirm Distributor code"],
   ["mapping.verify", "Verify Shop code"],
   ["mapping.end", "End mapping"],
+  ["mapping.history.view", "View Mapping History"],
 ];
 
 interface BusinessAccess {

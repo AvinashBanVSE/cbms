@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { portalRequest } from "./api";
+import { indiaTime } from "./indiaTime";
 
 export interface MappingContext {
   id: string;
@@ -13,23 +14,57 @@ const labels: Record<string, string> = {
   "mapping.verify": "Verify Shop code",
   "mapping.confirm": "Confirm Distributor code",
   "mapping.end": "Revoke code or end mapping",
+  "mapping.history.view": "View Mapping History",
 };
+
+interface MappingHistory {
+  data: { id: string; action: string; recorded_at: string }[];
+  next_page_url: string | null;
+}
 
 export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
   const [feedback, setFeedback] = useState("");
   const [selection, setSelection] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<{
+    path: string;
+    number: number;
+    page: MappingHistory;
+  }>();
   const selected = contexts[selection];
   const action = selected.action;
   const creating = action === "mapping.initiate";
   const ending = action === "mapping.end";
   const verifying = action === "mapping.verify";
+  const reading = action === "mapping.history.view";
+
+  async function loadHistory(path: string, number: number) {
+    setBusy(true);
+    setFeedback("");
+    try {
+      const page: MappingHistory = await (
+        await portalRequest(path + "?page=" + number)
+      ).json();
+      setHistory({ path, number, page });
+    } catch (error) {
+      setFeedback((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
     const id = encodeURIComponent(String(data.get("mapping_id") ?? "").trim());
+    if (reading) {
+      setHistory(undefined);
+      return loadHistory(
+        "businesses/" + selected.id + "/mappings/" + id + "/history",
+        1,
+      );
+    }
     const party = String(data.get("party") ?? "").trim();
     const code = String(data.get("code") ?? "").trim();
     const path = creating
@@ -77,6 +112,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
           onChange={(event) => {
             setSelection(Number(event.target.value));
             setFeedback("");
+            setHistory(undefined);
           }}
         >
           {contexts.map((context, index) => (
@@ -87,7 +123,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
         </select>
       </label>
       <form key={selection} onSubmit={submit}>
-        {ending && (
+        {(ending || reading) && (
           <label>
             Mapping ID
             <input name="mapping_id" required />
@@ -99,7 +135,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
             <input name="party" required />
           </label>
         )}
-        {!creating && !ending && (
+        {!creating && !ending && !reading && (
           <label>
             One-time code
             <input name="code" type="password" required />
@@ -107,6 +143,37 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
         )}
         <button disabled={busy}>{labels[action]}</button>
       </form>
+      {history && (
+        <>
+          <ol aria-label="Mapping History">
+            {history.page.data.map((entry) => (
+              <li key={entry.id}>
+                {entry.action} ·{" "}
+                <time dateTime={entry.recorded_at}>
+                  {indiaTime.format(new Date(entry.recorded_at))}
+                </time>
+              </li>
+            ))}
+          </ol>
+          {history.page.data.length === 0 && <p>No history on this page.</p>}
+          {history.number > 1 && (
+            <button
+              disabled={busy}
+              onClick={() => loadHistory(history.path, history.number - 1)}
+            >
+              Previous history page
+            </button>
+          )}
+          {history.page.next_page_url && (
+            <button
+              disabled={busy}
+              onClick={() => loadHistory(history.path, history.number + 1)}
+            >
+              Next history page
+            </button>
+          )}
+        </>
+      )}
       <p role="status">{feedback}</p>
     </>
   );

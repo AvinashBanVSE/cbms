@@ -179,6 +179,8 @@ final class OrganizationUserSetupTest extends TestCase
         $grant = $this->postJson($grantPath, $input)->assertCreated()->json('id');
         $this->actingAs($delegate);
         $this->getJson('/api/v1/organization-access-delegations')->assertJsonCount(1)->assertJsonPath('0.id', $grant);
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('administration', [])
+            ->assertJsonPath('delegations.0.id', $grant);
         $this->getJson($targetPath)->assertOk();
         $this->postJson($targetPath, [...$full, 'actions' => ['mapping.end']])->assertForbidden();
         $this->postJson($ownPath, $full)->assertForbidden();

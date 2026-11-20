@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
+use App\Http\Controllers\AuditTrailController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
@@ -20,6 +21,7 @@ use App\Http\Controllers\OrganizationUserController;
 use App\Http\Controllers\RoleApprovalController;
 use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
+use App\Http\Controllers\WorkspaceAccessController;
 use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -28,6 +30,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
+    Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
         Route::post('installation/owner', [InstallationController::class, 'owner'])->middleware('throttle:5,1,owner');
@@ -88,6 +92,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('shops/{shop}/mappings/{mapping}/confirm', [BusinessMappingController::class, 'confirm'])
         ->whereUuid(['shop', 'mapping'])->middleware('throttle:10,1,mapping-confirm');
     Route::post('businesses/{business}/mappings/{mapping}/end', [BusinessMappingController::class, 'end'])
+        ->whereUuid(['business', 'mapping']);
+    Route::get('businesses/{business}/mappings/{mapping}/history', [BusinessMappingController::class, 'history'])
         ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');

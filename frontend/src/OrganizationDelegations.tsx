@@ -80,6 +80,7 @@ export function OrganizationDelegations() {
             ["mapping.confirm", "Confirm Distributor code"],
             ["mapping.verify", "Verify Shop code"],
             ["mapping.end", "End mapping"],
+            ["mapping.history.view", "View Mapping History"],
           ].map(([value, label]) => (
             <label key={value}>
               <input name="actions" type="checkbox" value={value} />

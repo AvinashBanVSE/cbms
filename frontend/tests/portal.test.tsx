@@ -44,10 +44,16 @@ async function click(text: string) {
   await act(async () => button!.click());
 }
 const json = (data: unknown) => Response.json(data);
+const adminWorkspace = {
+  administration: ["services", "businesses", "users", "commercial"],
+  mapping_contexts: [],
+  delegations: [],
+};
 
 it("keeps dashboard appearance preferences after a reload", async () => {
   request.mockImplementation(async (path) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     throw new Error(path);
@@ -124,6 +130,8 @@ it("configures the portal, creates its owner, signs in, manages a service and si
       case "login":
       case "logout":
         return new Response(null, { status: 204 });
+      case "workspace-access":
+        return json(adminWorkspace);
       case "services/categories":
         return json({ B1: "Communications" });
       case "services":
@@ -224,6 +232,94 @@ it("displays a failed login and keeps the sign-in form available", async () => {
   await submit();
   expect(document.body.textContent).toContain("Sign-in denied");
 });
+
+it("opens only the assigned workspace without service catalogue access", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["commercial"] });
+    if (path === "logout") return new Response(null, { status: 204 });
+    throw new Error(path);
+  });
+  await render();
+  expect(document.querySelector("h1")?.textContent).toBe(
+    "Commercial management",
+  );
+  expect(document.querySelector("nav")?.textContent).toBe("Commercial");
+  expect(request).not.toHaveBeenCalledWith("services/categories");
+  await click("Sign out");
+  expect(document.querySelector("h1")?.textContent).toBe("Sign in");
+});
+
+it("keeps sign out available for an authenticated account without assignments", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: [] });
+    throw new Error(path);
+  });
+  await render();
+  expect(document.body.textContent).toContain(
+    "No workspace is assigned to this account.",
+  );
+  expect(document.querySelector('input[name="password"]')).toBeNull();
+  expect(document.body.textContent).toContain("Sign out");
+});
+
+it("filters the Audit Trail and loads older events without requesting catalogue data", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["audit"] });
+    if (path === "audit-trail?action=business.created&subject_id=org") {
+      return json({
+        data: [
+          {
+            id: "event",
+            action: "business.created",
+            recorded_at: "2026-11-20T00:00:00Z",
+            actor_id: "owner",
+            subject_id: "org",
+          },
+          {
+            id: "system-event",
+            action: "business.created",
+            recorded_at: "2026-11-19T00:00:00Z",
+            actor_id: null,
+            subject_id: null,
+          },
+        ],
+        next_before_id: "event",
+      });
+    }
+    if (
+      path ===
+      "audit-trail?action=business.created&subject_id=org&before_id=event"
+    )
+      return json({ data: [], next_before_id: null });
+    throw new Error("Audit Trail unavailable");
+  });
+  await render();
+  expect(document.querySelector("h1")?.textContent).toBe("Audit Trail");
+  input("action", "business.created");
+  input("subject_id", "org");
+  await submit('form[data-operation="audit-search"]');
+  expect(
+    document.querySelector('[aria-label="Audit events"]')?.textContent,
+  ).toContain("business.created");
+  expect(document.querySelector("time")?.getAttribute("datetime")).toBe(
+    "2026-11-20T00:00:00Z",
+  );
+  expect(
+    document.querySelector('[aria-label="Audit events"]')?.textContent,
+  ).toContain("Unavailable");
+  await click("Older events");
+  expect(document.body.textContent).toContain("No events match these filters.");
+  input("subject_id", "");
+  await submit('form[data-operation="audit-search"]');
+  expect(document.body.textContent).toContain("Audit Trail unavailable");
+  expect(request).not.toHaveBeenCalledWith("services/categories");
+});
 it("reports an invalid installation state", async () => {
   request.mockResolvedValue(json({ stage: "unknown" }));
   await render();
@@ -234,6 +330,7 @@ it("reports an invalid installation state", async () => {
 it("reports catalogue and sign-out errors", async () => {
   request
     .mockResolvedValueOnce(json({ stage: "ready" }))
+    .mockResolvedValueOnce(json(adminWorkspace))
     .mockResolvedValueOnce(json({ A1: "Identity" }))
     .mockRejectedValue(new Error("Service unavailable"));
   await render();
@@ -250,6 +347,8 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
     switch (path) {
       case "installation":
         return json({ stage: "ready" });
+      case "workspace-access":
+        return json(adminWorkspace);
       case "services/categories":
         return json({ A1: "Identity" });
       case "services?page=1":
@@ -325,6 +424,7 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
 it("reports an unavailable business directory", async () => {
   request
     .mockResolvedValueOnce(json({ stage: "ready" }))
+    .mockResolvedValueOnce(json(adminWorkspace))
     .mockResolvedValueOnce(json({ A1: "Identity" }))
     .mockResolvedValueOnce(json({ data: [] }))
     .mockRejectedValueOnce(new Error("Directory unavailable"));
@@ -336,30 +436,47 @@ it("reports an unavailable business directory", async () => {
 it("loads the customer mapping workspace and sends each action to its assigned business", async () => {
   request.mockImplementation(async (path) => {
     if (path === "installation") return json({ stage: "ready" });
-    if (path === "services/categories")
-      throw new PortalRequestError("Access denied", 403);
-    if (path === "organization-access-delegations")
-      return json([
-        {
-          id: "grant",
-          tenant_id: "tenant",
-          business_id: "shop",
-          professional_name: "My Shop",
-        },
-      ]);
-    if (path === "mapping-contexts")
-      return json(
-        ["initiate", "verify", "confirm", "end"].map((action) => ({
+    if (path === "workspace-access")
+      return json({
+        administration: [],
+        delegations: [
+          {
+            id: "grant",
+            tenant_id: "tenant",
+            business_id: "shop",
+            professional_name: "My Shop",
+          },
+        ],
+        mapping_contexts: [
+          "initiate",
+          "verify",
+          "confirm",
+          "end",
+          "history.view",
+        ].map((action) => ({
           id: action === "verify" ? "distributor" : "shop",
           professional_name: "My business",
           action: "mapping." + action,
         })),
-      );
+      });
     if (path === "shops/shop/mappings")
       return json({ id: "m1", code: "shop-code" });
     if (path.endsWith("/verify"))
       return json({ id: "m1", code: "distributor-code" });
     if (path.endsWith("/confirm")) return json({ state: "Active" });
+    if (path === "businesses/shop/mappings/m1/history?page=1")
+      return json({
+        data: [
+          {
+            id: "event",
+            action: "activated",
+            recorded_at: "2026-11-20T00:00:00Z",
+          },
+        ],
+        next_page_url: "/next",
+      });
+    if (path === "businesses/shop/mappings/m1/history?page=2")
+      return json({ data: [], next_page_url: null });
     if (path.endsWith("/end")) throw new Error("Mapping already ended");
     if (path === "logout") return new Response(null, { status: 204 });
     throw Error(path);
@@ -405,6 +522,20 @@ it("loads the customer mapping workspace and sends each action to its assigned b
   input("mapping_id", "m1");
   await submit("form:not([data-operation])");
   expect(document.body.textContent).toContain("Mapping already ended");
+  await select("4");
+  input("mapping_id", "m1");
+  await submit("form:not([data-operation])");
+  expect(
+    document.querySelector('[aria-label="Mapping History"]')?.textContent,
+  ).toContain("activated");
+  await click("Next history page");
+  expect(document.body.textContent).toContain("No history on this page.");
+  await click("Previous history page");
+  input("mapping_id", "invalid");
+  await submit("form:not([data-operation])");
+  expect(document.body.textContent).toContain(
+    "businesses/shop/mappings/invalid/history?page=1",
+  );
   await click("Sign out");
   expect(document.querySelector("h1")?.textContent).toBe("Sign in");
 });
@@ -414,6 +545,8 @@ it("configures account setup and provisions an authorized Organization user", as
     switch (path) {
       case "installation":
         return json({ stage: "ready" });
+      case "workspace-access":
+        return json(adminWorkspace);
       case "services/categories":
         return json({ A1: "Identity" });
       case "services?page=1":
@@ -488,6 +621,8 @@ it("configures account setup and provisions an authorized Organization user", as
 it("sets a permanent password through the separate restricted setup screen", async () => {
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      throw new PortalRequestError("Sign in first", 401);
     if (path === "organization-setup/verify") {
       if (!body?.otp) throw new Error("Code required");
       return json({ stage: "set_password" });
@@ -514,6 +649,7 @@ it("loads and changes individual business access controls independently", async 
   const path = "tenants/tenant/organization-users/AA2000/business-access/shop";
   request.mockImplementation(async (url, body) => {
     if (url === "installation") return json({ stage: "ready" });
+    if (url === "workspace-access") return json(adminWorkspace);
     if (url === "services/categories") return json({ A1: "Identity" });
     if (url === "services?page=1") return json({ data: [] });
     if (url === path && body === undefined)
@@ -556,6 +692,7 @@ it("loads and changes individual business access controls independently", async 
 it("grants and revokes a business access delegation from the administration screen", async () => {
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     if (path === "tenants/tenant/businesses/shop/access-delegations") {
@@ -603,6 +740,7 @@ it("registers a role and changes the selected user's assignment", async () => {
   const approvals = "tenants/tenant/businesses/shop/role-approvals";
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     if (path === base + "?page=1")
@@ -740,6 +878,7 @@ it("manages an Organization account state independently of business access", asy
   const base = "tenants/tenant/organization-users/AA7111/lifecycle";
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     if (path === base && !body)
@@ -800,6 +939,7 @@ it("applies a business lifecycle transition and refreshes the business directory
   let state = "Active";
   request.mockImplementation(async (url, body) => {
     if (url === "installation") return json({ stage: "ready" });
+    if (url === "workspace-access") return json(adminWorkspace);
     if (url === "services/categories") return json({ A1: "Identity" });
     if (url === "services?page=1") return json({ data: [] });
     if (url === "businesses?page=1")
@@ -848,6 +988,7 @@ it("previews a provider migration and submits only a valid reviewed scope", asyn
   let eligible = false;
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1" || path === "businesses?page=1")
       return json({ data: [] });
@@ -903,6 +1044,7 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
   let automatic = false;
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     if (path.startsWith("commercial?"))
@@ -1051,6 +1193,7 @@ it("changes a subscription state and resolves features for a covered business", 
   let renewed = false;
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") return json(adminWorkspace);
     if (path === "services/categories") return json({ A1: "Identity" });
     if (path === "services?page=1") return json({ data: [] });
     if (path === "commercial?section=subscriptions&page=1")
@@ -1192,6 +1335,7 @@ it("issues a billing record and records payments and reversals", async () => {
   });
   request.mockImplementation(async (url, body) => {
     if (url === "installation") return json({ stage: "ready" });
+    if (url === "workspace-access") return json(adminWorkspace);
     if (url === "services/categories") return json({ A1: "Identity" });
     if (url === "services?page=1") return json({ data: [] });
     if (url === "commercial/invoices" && body) return json(invoice());

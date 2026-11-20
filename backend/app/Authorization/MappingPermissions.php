@@ -8,10 +8,17 @@ use Illuminate\Validation\ValidationException;
 
 final class MappingPermissions
 {
+    public const MAX_ACTIONS = 4;
+
     private const ACTIONS = [
-        'Shop' => ['mapping.initiate', 'mapping.confirm', 'mapping.end'],
-        'Distributor' => ['mapping.verify', 'mapping.end'],
+        'Shop' => ['mapping.initiate', 'mapping.confirm', 'mapping.end', 'mapping.history.view'],
+        'Distributor' => ['mapping.verify', 'mapping.end', 'mapping.history.view'],
     ];
+
+    public static function actions(): array
+    {
+        return array_values(array_unique(array_merge(...array_values(self::ACTIONS))));
+    }
 
     public static function validate(?string $kind, array $actions): void
     {

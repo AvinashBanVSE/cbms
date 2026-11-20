@@ -30,7 +30,7 @@ final class CustomerBusinessAccess
 
         return $this->activeAssignments((string) $user)
             ->whereIn('entity.kind', ['Shop', 'Distributor'])
-            ->whereIn('permission.action', ['mapping.initiate', 'mapping.verify', 'mapping.confirm', 'mapping.end'])
+            ->whereIn('permission.action', MappingPermissions::actions())
             ->select('entity.id', 'entity.kind', 'entity.professional_name', 'permission.action')
             ->orderBy('entity.id')->orderBy('permission.action')->get()->all();
     }

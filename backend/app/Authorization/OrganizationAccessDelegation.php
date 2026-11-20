@@ -4,12 +4,24 @@ declare(strict_types=1);
 
 namespace App\Authorization;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 final class OrganizationAccessDelegation
 {
+    public function summariesFor(string $recipient): array
+    {
+        return $this->activeAssignments($recipient)
+            ->orderBy('grant.ends_at')->orderBy('grant.id')->get(['grant.id', 'grant.tenant_id', 'grant.business_id', 'grant.ends_at', 'business.professional_name'])
+            ->map(static function (object $grant): object {
+                $grant->ends_at = CarbonImmutable::parse($grant->ends_at, 'UTC')->utc()->toISOString();
+
+                return $grant;
+            })->all();
+    }
+
     public function activeAssignments(string $recipient): Builder
     {
         return DB::table('organization_access_delegations as grant')

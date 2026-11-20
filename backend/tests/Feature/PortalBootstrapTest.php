@@ -44,6 +44,7 @@ final class PortalBootstrapTest extends TestCase
         $owner = $this->postJson('/api/v1/installation/owner', ['name' => 'Owner', ...$credentials], $headers)->assertCreated();
         $this->assertMatchesRegularExpression('/^[A-Z]{2}[0-9]{4}$/', $owner->json('user_code'));
         $this->getJson('/api/v1/services/categories')->assertUnauthorized();
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
         $this->postJson('/api/v1/installation/owner', [], $headers)->assertConflict();
         $this->postJson('/api/v1/login', ['code' => $owner->json('user_code'), ...$credentials, 'password' => 'invalid'])->assertUnauthorized();
         $this->assertDatabaseHas('portal_events', ['action' => 'login.failed']);
@@ -52,6 +53,9 @@ final class PortalBootstrapTest extends TestCase
             'user_id' => DB::table('users')->where('code', $owner->json('user_code'))->value('id'),
         ]);
         $this->getJson('/api/v1/services/categories')->assertOk()->assertJsonCount(15);
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertExactJson(['administration' => ['services', 'businesses', 'users', 'commercial', 'audit'], 'mapping_contexts' => [], 'delegations' => []]);
+        $this->getJson('/api/v1/audit-trail')->assertOk();
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');
         $this->getJson('/api/v1/services')->assertOk()->assertJsonPath('data.0.id', $id);
@@ -67,10 +71,17 @@ final class PortalBootstrapTest extends TestCase
             'kind' => 'Organization', 'legal_name' => 'Customer Ltd', 'professional_name' => 'Customer',
             'provider_id' => DB::table('portal_installation')->value('portal_id'), 'new_owner_name' => 'Customer owner',
         ])->assertCreated();
-        DB::table('portal_grants')->delete();
+        DB::table('portal_grants')->where('permission', '!=', 'commercial.manage')->delete();
+        $this->getJson('/api/v1/workspace-access')->assertOk()
+            ->assertExactJson(['administration' => ['commercial'], 'mapping_contexts' => [], 'delegations' => []]);
+        $this->getJson('/api/v1/commercial?section=accounts')->assertOk();
+        $this->getJson('/api/v1/audit-trail')->assertForbidden();
         $this->getJson("/api/v1/services/{$id}/capabilities")->assertForbidden();
         $this->postJson('/api/v1/services', $service)->assertForbidden();
         $this->getJson('/api/v1/services/categories')->assertForbidden();
+        DB::table('portal_grants')->delete();
+        $this->getJson('/api/v1/workspace-access')->assertOk()
+            ->assertExactJson(['administration' => [], 'mapping_contexts' => [], 'delegations' => []]);
         $this->postJson('/api/v1/logout')->assertNoContent();
         $this->assertDatabaseHas('portal_events', ['action' => 'login.succeeded']);
         $this->assertDatabaseHas('portal_events', ['action' => 'logout']);

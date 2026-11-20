@@ -23,6 +23,8 @@ final class BusinessMappingTest extends TestCase
         $this->postJson($endpoint, ['distributor_id' => $distributor])->assertUnauthorized();
 
         $this->actingAs($shopUser);
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('administration', [])
+            ->assertJsonCount(3, 'mapping_contexts')->assertJsonMissing(['id' => $distributor]);
         $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(3)
             ->assertJsonPath('0.id', $shop)->assertJsonMissing(['id' => $distributor]);
         DB::table('customer_business_scopes')->where('user_id', $shopUser->id)->delete();
@@ -68,6 +70,17 @@ final class BusinessMappingTest extends TestCase
         $this->assertDatabaseCount('customer_business_scopes', 2);
         $this->assertDatabaseCount('distributor_shop_mapping_history', 4);
         $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'mapping.activated']);
+        $history = "/api/v1/businesses/{$shop}/mappings/{$id}/history";
+        $this->getJson($history)->assertForbidden();
+        DB::table('customer_permissions')->insert(['user_id' => $shopUser->id, 'business_id' => $shop, 'action' => 'mapping.history.view']);
+        $this->getJson($history)->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonCount(4, 'data')->assertJsonPath('data.0.action', 'terminated')
+            ->assertJsonMissingPath('data.0.actor_id')->assertJsonMissingPath('data.0.code_digest');
+        $this->getJson('/api/v1/audit-trail')->assertForbidden();
+        $this->getJson("/api/v1/businesses/{$distributor}/mappings/{$id}/history")->assertForbidden();
+        $this->getJson("/api/v1/businesses/{$shop}/mappings/".Str::uuid7().'/history')->assertNotFound();
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'mapping.history_viewed', 'actor_id' => $shopUser->id]);
+        $this->assertDatabaseCount('distributor_shop_mapping_history', 4);
     }
 
     public function test_expiry_and_revocation_block_verification(): void

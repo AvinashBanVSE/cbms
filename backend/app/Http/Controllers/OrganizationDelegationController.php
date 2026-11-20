@@ -7,7 +7,6 @@ namespace App\Http\Controllers;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\MappingPermissions;
 use App\Authorization\OrganizationAccessDelegation;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -27,13 +26,7 @@ final class OrganizationDelegationController
         $user = Auth::id();
         abort_if($user === null, 401);
 
-        return response()->json($this->delegation->activeAssignments((string) $user)
-            ->orderBy('grant.ends_at')->orderBy('grant.id')->get(['grant.id', 'grant.tenant_id', 'grant.business_id', 'grant.ends_at', 'business.professional_name'])
-            ->map(static function (object $grant): object {
-                $grant->ends_at = CarbonImmutable::parse($grant->ends_at, 'UTC')->utc()->toISOString();
-
-                return $grant;
-            }))
+        return response()->json($this->delegation->summariesFor((string) $user))
             ->header('Cache-Control', 'no-store');
     }
 
@@ -43,7 +36,7 @@ final class OrganizationDelegationController
         $data = $request->validate([
             'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
             'minutes' => 'required|integer|min:1|max:43200',
-            'actions' => 'required|array|list|max:3',
+            'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
             'actions.*' => 'required|string|distinct',
         ]);
 

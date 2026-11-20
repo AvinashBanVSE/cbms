@@ -76,7 +76,7 @@ final class OrganizationUserController
         $input = $request->validate([
             'email' => 'required|email|max:254',
             'business_id' => 'required|uuid',
-            'actions' => 'required|array|list|max:3',
+            'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
             'actions.*' => 'required|string|distinct',
         ]);
         $business = DB::table('business_identities')->where('id', $input['business_id'])->where('parent_id', $organization)->value('kind');

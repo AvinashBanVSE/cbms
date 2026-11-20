@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\CustomerBusinessAccess;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -89,6 +90,30 @@ final class BusinessMappingController
 
             return response()->json(['id' => $mapping, 'state' => 'Terminated']);
         });
+    }
+
+    public function history(string $business, string $mapping): JsonResponse
+    {
+        abort_unless(Auth::check(), 401);
+        $kind = DB::table('business_identities')->where('id', $business)->value('kind');
+        abort_unless(in_array($kind, ['Shop', 'Distributor'], true), 403);
+        $actor = $this->access->requirePermission($business, $kind, 'mapping.history.view');
+        $endpoint = $kind === 'Shop' ? 'shop_id' : 'distributor_id';
+        abort_unless(DB::table('distributor_shop_mappings')->where('id', $mapping)->where($endpoint, $business)->exists(), 404);
+        $records = DB::table('distributor_shop_mapping_history')->where('mapping_id', $mapping)
+            ->orderByDesc('recorded_at')->orderByDesc('id')->simplePaginate(30, ['id', 'action', 'recorded_at']);
+        $records->through(static function (object $entry): object {
+            $entry->recorded_at = CarbonImmutable::parse($entry->recorded_at, 'UTC')->utc()->toISOString();
+
+            return $entry;
+        });
+        DB::table('portal_events')->insert([
+            'id' => Str::uuid7()->toString(), 'actor_id' => $actor, 'subject_id' => $mapping,
+            'action' => 'mapping.history_viewed', 'recorded_at' => now(),
+            'details' => json_encode(['business_id' => $business, 'page' => $records->currentPage()], JSON_THROW_ON_ERROR),
+        ]);
+
+        return response()->json($records)->header('Cache-Control', 'no-store');
     }
 
     private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): string

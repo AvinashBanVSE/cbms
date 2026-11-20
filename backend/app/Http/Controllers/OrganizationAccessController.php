@@ -33,7 +33,7 @@ final class OrganizationAccessController
         $input = $request->validate([
             'associated' => 'required|boolean',
             'in_scope' => 'required|boolean',
-            'actions' => 'present|array|list|max:3',
+            'actions' => 'present|array|list|max:'.MappingPermissions::MAX_ACTIONS,
             'actions.*' => 'required|string|distinct',
         ]);
 
