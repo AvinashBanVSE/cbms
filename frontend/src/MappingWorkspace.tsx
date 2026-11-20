@@ -37,15 +37,15 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
       : ending
         ? "businesses/" + selected.id + "/mappings/" + id + "/end"
         : verifying
-          ? "distributors/" + selected.id + "/mappings/" + id + "/verify"
-          : "shops/" + selected.id + "/mappings/" + id + "/confirm";
+          ? "distributors/" + selected.id + "/mappings/verify"
+          : "shops/" + selected.id + "/mappings/confirm";
     const body: Record<string, string> = creating
       ? { distributor_id: party }
       : ending
         ? {}
         : verifying
           ? { shop_id: party, code }
-          : { distributor_id: party, code };
+          : { code };
     setBusy(true);
     setFeedback("");
     try {
@@ -53,7 +53,11 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
       form.reset();
       setFeedback(
         result.code
-          ? "Mapping ID: " + result.id + " | One-time code: " + result.code
+          ? (creating ? "Shop ID: " + selected.id + " | " : "") +
+              "One-time code: " +
+              result.code +
+              " | Mapping ID (for revocation): " +
+              result.id
           : "Mapping status: " + result.state,
       );
     } catch (error) {
@@ -83,13 +87,13 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
         </select>
       </label>
       <form key={selection} onSubmit={submit}>
-        {!creating && (
+        {ending && (
           <label>
             Mapping ID
             <input name="mapping_id" required />
           </label>
         )}
-        {!ending && (
+        {(creating || verifying) && (
           <label>
             {verifying ? "Shop ID" : "Distributor ID"}
             <input name="party" required />

@@ -58,9 +58,10 @@ final class BusinessStructureController
             $provider = $data['provider_id'] ?? null;
             $ownerIds = $this->resolveOwners($data, $parent);
             if ($provider !== null) {
-                $kind = DB::table('business_identities')->where('id', $provider)->lockForUpdate()->value('kind');
-                if (! in_array($kind, ['Main Portal', 'Sub-Portal'], true)) {
-                    throw ValidationException::withMessages(['provider_id' => 'Select Main Portal or a Sub-Portal as the service provider.']);
+                $identity = DB::table('business_identities')->where('id', $provider)->lockForUpdate()->first(['kind', 'operational_state']);
+                if ($identity === null || ! in_array($identity->kind, ['Main Portal', 'Sub-Portal'], true)
+                    || $identity->operational_state !== 'Active') {
+                    throw ValidationException::withMessages(['provider_id' => 'Select an active Main Portal or Sub-Portal as the service provider.']);
                 }
             }
 

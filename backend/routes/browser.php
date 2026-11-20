@@ -79,6 +79,10 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('mapping-contexts', fn (CustomerBusinessAccess $access) => response()->json($access->mappingContexts())->header('Cache-Control', 'no-store'));
     Route::post('shops/{shop}/mappings', [BusinessMappingController::class, 'initiate'])
         ->whereUuid('shop')->middleware('throttle:10,1,mapping-initiate');
+    Route::post('distributors/{distributor}/mappings/verify', [BusinessMappingController::class, 'verifyShop'])
+        ->whereUuid('distributor')->middleware('throttle:10,1,mapping-verify');
+    Route::post('shops/{shop}/mappings/confirm', [BusinessMappingController::class, 'confirm'])
+        ->whereUuid('shop')->middleware('throttle:10,1,mapping-confirm');
     Route::post('distributors/{distributor}/mappings/{mapping}/verify', [BusinessMappingController::class, 'verifyShop'])
         ->whereUuid(['distributor', 'mapping'])->middleware('throttle:10,1,mapping-verify');
     Route::post('shops/{shop}/mappings/{mapping}/confirm', [BusinessMappingController::class, 'confirm'])

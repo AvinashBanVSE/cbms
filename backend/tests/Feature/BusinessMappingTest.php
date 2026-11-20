@@ -33,10 +33,10 @@ final class BusinessMappingTest extends TestCase
             ->assertHeader('Cache-Control', 'no-store, private');
         $id = $start->json('id');
         $code = $start->json('code');
-        $verify = "/api/v1/distributors/{$distributor}/mappings/{$id}/verify";
-        $confirm = "{$endpoint}/{$id}/confirm";
+        $verify = "/api/v1/distributors/{$distributor}/mappings/verify";
+        $confirm = "{$endpoint}/confirm";
         $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $id, 'state' => 'pending_distributor', 'code_digest' => hash('sha256', $code)]);
-        $this->postJson($confirm, ['distributor_id' => $distributor, 'code' => $code])->assertUnprocessable();
+        $this->postJson($confirm, ['code' => $code])->assertUnprocessable();
         $this->postJson($verify, ['shop_id' => $shop, 'code' => $code])->assertForbidden();
         // A misconfigured assignment must never bridge separate tenants.
         foreach (['customer_business_associations', 'customer_business_scopes', 'customer_permissions'] as $table) {
@@ -52,15 +52,16 @@ final class BusinessMappingTest extends TestCase
         $this->getJson('/api/v1/mapping-contexts')->assertJsonMissing(['id' => $distributor]);
 
         $this->actingAs($distributorUser);
-        $second = $this->postJson($verify, ['shop_id' => $shop, 'code' => $code])->assertOk()->json('code');
+        $this->postJson($verify, ['shop_id' => Str::uuid7()->toString(), 'code' => $code])->assertUnprocessable();
+        $second = $this->postJson($verify, ['shop_id' => $shop, 'code' => $code])->assertOk()->assertJsonPath('id', $id)->json('code');
         $this->assertNotSame($code, $second);
         $this->postJson($verify, ['shop_id' => $shop, 'code' => $code])->assertUnprocessable();
         $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $id, 'state' => 'pending_shop']);
 
         $this->actingAs($shopUser);
-        $this->postJson($confirm, ['distributor_id' => $distributor, 'code' => $code])->assertUnprocessable();
-        $this->postJson($confirm, ['distributor_id' => $distributor, 'code' => $second])->assertOk()->assertJsonPath('state', 'Active');
-        $this->postJson($confirm, ['distributor_id' => $distributor, 'code' => $second])->assertUnprocessable();
+        $this->postJson($confirm, ['code' => $code])->assertUnprocessable();
+        $this->postJson($confirm, ['code' => $second])->assertOk()->assertJsonPath('state', 'Active');
+        $this->postJson($confirm, ['code' => $second])->assertUnprocessable();
         $this->postJson("/api/v1/businesses/{$shop}/mappings/{$id}/end")->assertOk();
         $this->assertDatabaseHas('business_identities', ['id' => $shop, 'parent_id' => $shopParent]);
         $this->assertDatabaseHas('business_identities', ['id' => $distributor, 'parent_id' => $distributorParent]);
@@ -86,6 +87,26 @@ final class BusinessMappingTest extends TestCase
                 'shop_id' => $shop, 'code' => $mapping['code'],
             ])->assertUnprocessable();
         }
+    }
+
+    public function test_mapping_is_bound_to_the_intended_distributor_and_supports_existing_clients(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1030', ['mapping.initiate', 'mapping.confirm']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1031', ['mapping.verify']);
+        [$unrelated, $unrelatedUser] = $this->endpoint('Distributor', 'AA1032', ['mapping.verify']);
+        $path = "/api/v1/shops/{$shop}/mappings";
+        $this->actingAs($shopUser);
+        $pending = $this->postJson($path, ['distributor_id' => $distributor])->assertCreated()->json();
+        $proof = ['shop_id' => $shop, 'code' => $pending['code']];
+
+        $this->actingAs($unrelatedUser);
+        $this->postJson("/api/v1/distributors/{$unrelated}/mappings/verify", $proof)->assertUnprocessable();
+        $this->actingAs($distributorUser);
+        $second = $this->postJson("/api/v1/distributors/{$distributor}/mappings/{$pending['id']}/verify", $proof)
+            ->assertOk()->assertJsonPath('id', $pending['id'])->json('code');
+        $this->actingAs($shopUser);
+        $this->postJson("{$path}/{$pending['id']}/confirm", ['code' => $second, 'distributor_id' => $distributor])
+            ->assertOk()->assertJsonPath('state', 'Active');
     }
 
     private function endpoint(string $kind, string $code, array $actions): array

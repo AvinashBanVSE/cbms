@@ -370,6 +370,7 @@ it("loads the customer mapping workspace and sends each action to its assigned b
   ).toContain("My Shop");
   input("party", "distributor");
   await submit("form:not([data-operation])");
+  expect(document.body.textContent).toContain("Shop ID: shop");
   expect(document.body.textContent).toContain("shop-code");
   const selection =
     document.querySelector<HTMLSelectElement>("section select")!;
@@ -378,26 +379,30 @@ it("loads the customer mapping workspace and sends each action to its assigned b
       selection.value = value;
       selection.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    input("mapping_id", "m1");
   }
   await select("1");
+  expect(document.querySelector('[name="mapping_id"]')).toBeNull();
   input("party", "shop");
   document.querySelector<HTMLInputElement>(
     'form:not([data-operation]) [name="code"]',
   )!.value = "shop-code";
   await submit("form:not([data-operation])");
   expect(request).toHaveBeenCalledWith(
-    "distributors/distributor/mappings/m1/verify",
+    "distributors/distributor/mappings/verify",
     { shop_id: "shop", code: "shop-code" },
   );
   await select("2");
-  input("party", "distributor");
+  expect(document.querySelector('[name="party"]')).toBeNull();
   document.querySelector<HTMLInputElement>(
     'form:not([data-operation]) [name="code"]',
   )!.value = "distributor-code";
   await submit("form:not([data-operation])");
+  expect(request).toHaveBeenCalledWith("shops/shop/mappings/confirm", {
+    code: "distributor-code",
+  });
   expect(document.body.textContent).toContain("Mapping status: Active");
   await select("3");
+  input("mapping_id", "m1");
   await submit("form:not([data-operation])");
   expect(document.body.textContent).toContain("Mapping already ended");
   await click("Sign out");

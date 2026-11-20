@@ -35,34 +35,37 @@ final class BusinessMappingController
         });
     }
 
-    public function verifyShop(Request $request, string $distributor, string $mapping): JsonResponse
+    public function verifyShop(Request $request, string $distributor, ?string $mapping = null): JsonResponse
     {
         $actor = $this->access->requirePermission($distributor, 'Distributor', 'mapping.verify');
         $input = $request->validate(['shop_id' => 'required|uuid', 'code' => 'required|string|size:32']);
 
         return DB::transaction(function () use ($mapping, $distributor, $actor, $input): JsonResponse {
             $secret = bin2hex(random_bytes(16));
-            $this->consume($mapping, $input['shop_id'], $distributor, 'pending_distributor', $input['code'], [
+            $id = $this->consume($mapping, $input['shop_id'], $distributor, 'pending_distributor', $input['code'], [
                 'state' => 'pending_shop', ...$this->codeFields($secret),
             ]);
-            $this->record($mapping, $actor, 'shop_code_verified');
+            $this->record($id, $actor, 'shop_code_verified');
 
-            return $this->secretResponse($mapping, $secret);
+            return $this->secretResponse($id, $secret);
         });
     }
 
-    public function confirm(Request $request, string $shop, string $mapping): JsonResponse
+    public function confirm(Request $request, string $shop, ?string $mapping = null): JsonResponse
     {
         $actor = $this->access->requirePermission($shop, 'Shop', 'mapping.confirm');
-        $input = $request->validate(['distributor_id' => 'required|uuid', 'code' => 'required|string|size:32']);
+        $input = $request->validate([
+            'distributor_id' => $mapping === null ? 'prohibited' : 'required|uuid',
+            'code' => 'required|string|size:32',
+        ]);
 
         return DB::transaction(function () use ($mapping, $shop, $actor, $input): JsonResponse {
-            $this->consume($mapping, $shop, $input['distributor_id'], 'pending_shop', $input['code'], [
+            $id = $this->consume($mapping, $shop, $input['distributor_id'] ?? null, 'pending_shop', $input['code'], [
                 'state' => 'Active', 'code_digest' => null, 'expires_at' => null,
             ]);
-            $this->record($mapping, $actor, 'activated');
+            $this->record($id, $actor, 'activated');
 
-            return response()->json(['id' => $mapping, 'state' => 'Active']);
+            return response()->json(['id' => $id, 'state' => 'Active']);
         });
     }
 
@@ -88,15 +91,21 @@ final class BusinessMappingController
         });
     }
 
-    private function consume(string $id, string $shop, string $distributor, string $state, string $code, array $next): void
+    private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): string
     {
-        $this->requireActiveEndpoints($shop, $distributor);
         $query = DB::table('distributor_shop_mappings')->where([
-            'id' => $id, 'shop_id' => $shop, 'distributor_id' => $distributor, 'state' => $state,
-        ])->where('expires_at', '>', now());
-        $digest = $query->value('code_digest');
-        abort_unless(is_string($digest) && hash_equals($digest, hash('sha256', $code)), 422, 'Mapping code is unavailable or invalid.');
-        abort_unless($query->where('code_digest', $digest)->update([...$next, 'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1')]) === 1, 422, 'Mapping code is unavailable or invalid.');
+            'shop_id' => $shop, 'state' => $state, 'code_digest' => hash('sha256', $code),
+        ])->when($id !== null, fn ($mappings) => $mappings->where('id', $id))
+            ->when($distributor !== null, fn ($mappings) => $mappings->where('distributor_id', $distributor));
+        $matches = $query->clone()->where('expires_at', '>', now())->limit(2)->get(['id', 'distributor_id']);
+        abort_unless($matches->count() === 1, 422, 'Mapping code is unavailable or invalid.');
+        $mapping = $matches->first();
+        $this->requireActiveEndpoints($shop, $mapping->distributor_id);
+        abort_unless($query->where('id', $mapping->id)->where('expires_at', '>', now())
+            ->update([...$next, 'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1')]) === 1,
+            422, 'Mapping code is unavailable or invalid.');
+
+        return $mapping->id;
     }
 
     private function requireActiveEndpoints(string $shop, string $distributor): void

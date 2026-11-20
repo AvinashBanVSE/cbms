@@ -56,6 +56,8 @@ final class BusinessStructureTest extends TestCase
         $organization = $this->create(['kind' => 'Organization', 'provider_id' => $main, 'new_owner_name' => 'Owner']);
         $this->invalid(['kind' => 'Shop', 'parent_id' => $organization, 'new_owner_name' => 'Another owner'], 'new_owner_name');
         $this->invalid(['kind' => 'Organization', 'provider_id' => $organization, 'new_owner_name' => 'Another owner'], 'provider_id');
+        DB::table('business_identities')->where('id', $main)->update(['operational_state' => 'Suspended']);
+        $this->invalid(['kind' => 'Organization', 'provider_id' => $main, 'new_owner_name' => 'Temporary'], 'provider_id');
         $this->assertDatabaseCount('customer_tenants', 1);
         $this->assertDatabaseCount('ownership_holders', 1);
     }
