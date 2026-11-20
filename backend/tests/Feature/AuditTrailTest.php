@@ -30,6 +30,12 @@ final class AuditTrailTest extends TestCase
         $this->getJson($path.'?subject_id=unknown')->assertUnprocessable();
         $this->getJson($path.'?before_id='.Str::uuid7())->assertNotFound();
 
+        DB::table('business_time_presentation')->insert([
+            'business_id' => $portal, 'clock' => '24-hour', 'version' => 1,
+        ]);
+        DB::table('business_calendar_presentation')->insert([
+            'business_id' => $portal, 'setting' => 'date_format', 'value' => 'year-month-day', 'version' => 1,
+        ]);
         $subject = Str::uuid7()->toString();
         $ids = [];
         for ($index = 0; $index < 31; $index++) {
@@ -44,6 +50,7 @@ final class AuditTrailTest extends TestCase
         $first = $this->getJson($filtered)->assertOk()->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonCount(30, 'data')->assertJsonPath('data.0.id', $ids[0])
             ->assertJsonPath('data.0.recorded_at', '2026-11-20T00:00:00.000000Z')
+            ->assertJsonPath('presentation.clock', '24-hour')->assertJsonPath('presentation.date_format', 'year-month-day')
             ->assertJsonMissingPath('data.0.details')->assertJsonPath('next_before_id', $ids[29]);
         $this->getJson($filtered.'&before_id='.$first->json('next_before_id'))->assertOk()
             ->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $ids[30])->assertJsonPath('next_before_id', null);

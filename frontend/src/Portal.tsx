@@ -2,7 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CommercialWorkspace } from "./CommercialWorkspace";
 import { AuditTrail } from "./AuditTrail";
 import { AuthenticatorSettings } from "./AuthenticatorSettings";
-import { BusinessTimePresentation } from "./BusinessTimePresentation";
+import {
+  BusinessTimePresentation,
+  type PresentationSetting,
+} from "./BusinessTimePresentation";
 import { GlobalBusinessSettings } from "./GlobalBusinessSettings";
 import { LegalIdentities } from "./LegalIdentities";
 import { portalRequest, PortalRequestError } from "./api";
@@ -61,7 +64,11 @@ interface WorkspaceAccess {
   delegations: ActiveAccessDelegation[];
   organization_onboarding?: { tenant_id: string; professional_name: string };
   organization_recovery?: { tenant_id: string; professional_name: string };
-  organization_time_presentation?: { id: string; professional_name: string };
+  organization_time_presentation?: {
+    id: string;
+    professional_name: string;
+    settings?: PresentationSetting[];
+  };
   provider_directory?: { id: string; professional_name: string };
 }
 
@@ -286,7 +293,14 @@ export function Portal() {
                   {workspace.organization_time_presentation.professional_name} ·
                   Business settings
                 </h2>
-                <BusinessTimePresentation organization />
+                <BusinessTimePresentation
+                  organization
+                  settingsKeys={
+                    workspace.organization_time_presentation.settings ?? [
+                      "clock",
+                    ]
+                  }
+                />
               </section>
             )}
             {workspace.organization_recovery && (

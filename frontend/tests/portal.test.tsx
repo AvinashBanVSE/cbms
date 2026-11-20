@@ -55,6 +55,33 @@ it("shows the Indian platform settings and manages the clock format", async () =
     if (path === "installation") return json({ stage: "ready" });
     if (path === "workspace-access")
       return json({ ...adminWorkspace, administration: ["business_settings"] });
+    if (
+      path.startsWith(
+        "global-business-settings/calendar-presentation/date_format",
+      )
+    ) {
+      const date_format = body ? "year-month-day" : "day-month-year";
+      if (body)
+        expect(body).toEqual({
+          date_format,
+          override_allowed: false,
+          locked: false,
+          expected_version: 1,
+        });
+      return json({
+        business_id: "platform",
+        scope: "platform",
+        effective: { date_format, source: "platform" },
+        upstream_lock: null,
+        local: {
+          date_format,
+          override_allowed: false,
+          locked: false,
+          version: body ? 2 : 1,
+        },
+        can_manage: true,
+      });
+    }
     if (path.endsWith("/other-organization/access")) {
       expect(body).toEqual({ code: "AA7788", enabled: true });
       return json({ enabled: true });
@@ -187,6 +214,21 @@ it("shows the Indian platform settings and manages the clock format", async () =
   await submit(load);
   expect(settings.textContent).toContain("Business unavailable.");
   expect(settings.querySelector(editor)).toBeNull();
+  const preference = document.querySelector<HTMLSelectElement>(
+    'select[name="presentation_setting"]',
+  )!;
+  await act(async () => {
+    preference.value = "date_format";
+    preference.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  input("business", "");
+  await submit(load);
+  expect(settings.textContent).toContain("Date format: DD/MM/YYYY");
+  document.querySelector<HTMLSelectElement>(
+    editor + ' select[name="date_format"]',
+  )!.value = "year-month-day";
+  await submit(editor);
+  expect(settings.textContent).toContain("Date format: YYYY-MM-DD");
 });
 
 it("edits the clock in the Organization workspace without governance controls", async () => {
@@ -852,6 +894,7 @@ it("filters the Audit Trail and loads older events without requesting catalogue 
           },
         ],
         next_before_id: "event",
+        presentation: { clock: "24-hour", date_format: "year-month-day" },
       });
     }
     if (
@@ -871,6 +914,9 @@ it("filters the Audit Trail and loads older events without requesting catalogue 
   ).toContain("business.created");
   expect(document.querySelector("time")?.getAttribute("datetime")).toBe(
     "2026-11-20T00:00:00Z",
+  );
+  expect(document.querySelector("time")?.textContent).toBe(
+    "2026-11-20 05:30:00",
   );
   expect(
     document.querySelector('[aria-label="Audit events"]')?.textContent,

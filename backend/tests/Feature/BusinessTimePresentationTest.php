@@ -111,9 +111,37 @@ final class BusinessTimePresentationTest extends TestCase
         $this->assertDatabaseHas('portal_events', ['action' => 'global_business_settings.time_presentation_changed', 'actor_id' => $editor, 'subject_id' => $organization]);
 
         $this->actingAs(User::findOrFail($mainUser));
+        $calendar = '/api/v1/global-business-settings/calendar-presentation';
+        $organizationDate = '/api/v1/organization-calendar-presentation/date_format';
+        $this->postJson($calendar.'/unexpected', ['date_format' => 'year-month-day'])->assertNotFound();
+        $this->postJson($calendar.'/date_format/'.$organization, [
+            'date_format' => null, 'override_allowed' => true, 'locked' => false, 'expected_version' => 0,
+        ])->assertOk();
+        $this->postJson($calendar.'/week_start', [
+            'week_start' => 'monday', 'override_allowed' => false, 'locked' => true, 'expected_version' => 0,
+        ])->assertOk();
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson($organizationDate)->assertForbidden();
+        $this->actingAs(User::findOrFail($mainUser));
+        $this->postJson($calendar.'/date_format/'.$organization.'/access', $grant)->assertOk();
+        $this->actingAs(User::findOrFail($editor));
+        $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('organization_time_presentation.settings', ['clock', 'date_format']);
+        $this->postJson($organizationDate, ['date_format' => 'yyyy', 'expected_version' => 1])->assertUnprocessable();
+        $this->postJson($organizationDate, ['date_format' => 'year-month-day', 'expected_version' => 1])
+            ->assertOk()->assertJsonPath('effective.date_format', 'year-month-day')->assertJsonPath('effective.source', 'organization');
+        $this->getJson('/api/v1/organization-calendar-presentation/week_start')->assertForbidden();
+        $this->actingAs(User::findOrFail($mainUser));
+        DB::table('portal_grants')->insert(['user_id' => $mainUser, 'business_id' => $portal, 'permission' => 'global_business_settings.view']);
+        $this->getJson($calendar.'/date_format/'.$shop)->assertOk()->assertJsonPath('effective.date_format', 'year-month-day');
+        $this->getJson($calendar.'/date_format/'.$other)->assertOk()->assertJsonPath('effective.date_format', null);
+        $this->getJson($calendar.'/week_start/'.$shop)->assertOk()->assertJsonPath('effective.week_start', 'monday')
+            ->assertJsonPath('upstream_lock', 'platform');
+
         $this->postJson($base, ['clock' => '24-hour', 'override_allowed' => false, 'locked' => true, 'expected_version' => 0])->assertOk();
         $this->actingAs(User::findOrFail($editor));
         $this->getJson($settings)->assertOk()->assertJsonPath('can_manage', false)->assertJsonPath('effective.clock', '24-hour');
+        $this->getJson($organizationDate)->assertOk()->assertJsonPath('can_manage', true)
+            ->assertJsonPath('effective.date_format', 'year-month-day');
         $this->postJson($settings, [...$clock, 'expected_version' => 2])->assertForbidden();
         $this->actingAs(User::findOrFail($mainUser));
         $this->postJson($access, [...$grant, 'enabled' => false])->assertOk()->assertJsonPath('enabled', false);

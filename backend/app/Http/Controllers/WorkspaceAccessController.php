@@ -33,7 +33,7 @@ final class WorkspaceAccessController
         $organization = $onboarding->contextFor((string) $user);
         $recovery = $onboarding->contextFor((string) $user, OrganizationOnboardingAccess::RECOVERY);
         $provider = $providers->directoryFor((string) $user);
-        $timeSettings = $timePresentation->contextFor((string) $user);
+        $timeSettings = $timePresentation->workspaceContext((string) $user);
 
         return response()->json([
             'administration' => $workspaces,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Configuration\BusinessTimePresentation;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +16,7 @@ use Illuminate\Support\Str;
 
 final class AuditTrailController
 {
-    public function __invoke(Request $request, MainPortalAccess $access): JsonResponse
+    public function __invoke(Request $request, MainPortalAccess $access, BusinessTimePresentation $presentation): JsonResponse
     {
         $access->requirePermission('audit_trail.view');
         $input = $request->validate([
@@ -53,8 +54,14 @@ final class AuditTrailController
             'details' => json_encode($input, JSON_THROW_ON_ERROR),
         ]);
 
+        $portal = DB::table('portal_installation')->where('id', 1)->value('portal_id');
+
         return response()->json([
             'data' => $page, 'next_before_id' => $results->count() > 30 ? $page->last()->id : null,
+            'presentation' => [
+                'clock' => $presentation->resolve($portal, $portal)['effective']['clock'],
+                'date_format' => $presentation->resolve($portal, $portal, 'date_format')['effective']['date_format'],
+            ],
         ])->header('Cache-Control', 'no-store');
     }
 }

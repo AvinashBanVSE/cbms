@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { portalRequest } from "./api";
-import { indiaTime } from "./indiaTime";
+import { formatPresentedTimestamp } from "./indiaTime";
 
 interface AuditEvent {
   id: string;
@@ -13,6 +13,7 @@ interface AuditEvent {
 interface AuditPage {
   data: AuditEvent[];
   next_before_id: string | null;
+  presentation?: { clock: string | null; date_format: string | null };
 }
 
 export function AuditTrail() {
@@ -73,7 +74,11 @@ export function AuditTrail() {
                     <dt>Recorded in India time</dt>
                     <dd>
                       <time dateTime={event.recorded_at}>
-                        {indiaTime.format(new Date(event.recorded_at))}
+                        {formatPresentedTimestamp(
+                          new Date(event.recorded_at),
+                          page.presentation?.clock,
+                          page.presentation?.date_format,
+                        )}
                       </time>
                     </dd>
                     <dt>Actor ID</dt>
