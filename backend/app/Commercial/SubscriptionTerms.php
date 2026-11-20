@@ -21,8 +21,7 @@ final class SubscriptionTerms
 
     public static function issueInvoice(object $subscription, string $issuedOn, string $dueOn, ?string $actor): object
     {
-        $charge = DB::table('commercial_plan_versions')->where('id', $subscription->plan_version_id)->value('amount_paise');
-        abort_if($charge === null, 409);
+        $charge = SubscriptionAddOns::total($subscription);
         $row = [
             'id' => Str::uuid7()->toString(), 'subscription_id' => $subscription->id,
             'amount_paise' => (int) $charge, 'issued_on' => $issuedOn, 'due_on' => $dueOn,

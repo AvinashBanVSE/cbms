@@ -37,6 +37,8 @@ final class CommercialFoundationTest extends TestCase
         $this->getJson($base.'?section=accounts')->assertForbidden();
         $this->getJson("{$base}/businesses/{$child}/effective-entitlements")->assertForbidden();
         $this->postJson("{$base}/subscriptions/{$tenant}/transition", [])->assertForbidden();
+        $this->postJson("{$base}/subscriptions/{$tenant}/renew", [])->assertForbidden();
+        $this->postJson($base.'/add_ons', [])->assertForbidden();
         foreach (['commercial.manage', 'business_structure.create'] as $permission) {
             DB::table('portal_grants')->insert(['business_id' => $portal, 'user_id' => $administrator, 'permission' => $permission]);
         }
@@ -104,9 +106,12 @@ final class CommercialFoundationTest extends TestCase
         $subscription = $this->postJson($base.'/subscriptions', [
             ...$terms, 'renewal_lead_days' => 5, 'renewal_grace_days' => 3, 'renewal_grace_policy' => 'retain_features',
         ])->assertCreated()->json('id');
+        $addOn = $this->attachFeatureAddOn($base, $subscription, $input, $child);
         $invoice = $this->postJson($base.'/invoices', ['subscription_id' => $subscription, 'due_on' => '2032-03-20'])
-            ->assertCreated()->json('id');
-        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12345, 'receipt_reference' => 'AUTO-FIRST'])->assertCreated();
+            ->assertCreated()->assertJsonPath('amount_paise', 12445)->json('id');
+        $this->postJson("{$base}/subscriptions/{$subscription}/add_ons", ['add_on_version_id' => $addOn, 'business_id' => $organization])
+            ->assertConflict();
+        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12445, 'receipt_reference' => 'AUTO-FIRST'])->assertCreated();
         $this->postJson("{$base}/subscriptions/{$subscription}/transition", [
             'action' => 'activate', 'expected_state' => 'Pending Activation', 'reason' => 'First term paid',
         ])->assertOk();
@@ -120,7 +125,10 @@ final class CommercialFoundationTest extends TestCase
         $this->assertSame('automatic', $next->renewal_mode);
         $this->assertDatabaseHas('commercial_subscription_coverage', ['subscription_id' => $next->id, 'business_id' => $child]);
         $this->assertDatabaseHas('commercial_subscription_coverage', ['subscription_id' => $next->id, 'business_id' => $organization]);
-        $this->assertDatabaseHas('commercial_invoices', ['subscription_id' => $next->id, 'issued_on' => '2032-03-24', 'due_on' => '2032-03-29']);
+        $this->assertDatabaseHas('commercial_subscription_add_ons', ['subscription_id' => $next->id, 'business_id' => $child, 'add_on_version_id' => $addOn]);
+        $this->assertDatabaseHas('commercial_invoices', [
+            'subscription_id' => $next->id, 'issued_on' => '2032-03-24', 'due_on' => '2032-03-29', 'amount_paise' => 12445,
+        ]);
         $this->postJson("{$base}/subscriptions/{$subscription}/transition", [
             'action' => 'cancel', 'expected_state' => 'Active', 'reason' => 'Agreement ended by request',
         ])->assertConflict()->assertJsonPath('message', 'Cancel the upcoming renewal before cancelling this term.');
@@ -133,7 +141,8 @@ final class CommercialFoundationTest extends TestCase
             'id' => $next->id, 'state' => 'Grace Period', 'grace_ends_before' => '2032-04-01',
         ]);
         $available = "{$base}/businesses/{$child}/effective-entitlements";
-        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.exports', 'portal.reports']);
+        $this->getJson("{$base}/businesses/{$organization}/effective-entitlements")->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
         $this->travelTo(CarbonImmutable::parse('2032-04-01', 'Asia/Kolkata'));
         $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
         $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['effective_state' => 'Suspended']);
@@ -141,7 +150,7 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Suspended']);
         $this->assertDatabaseHas('business_identities', ['id' => $child, 'operational_state' => 'Active']);
         $invoice = DB::table('commercial_invoices')->where('subscription_id', $next->id)->value('id');
-        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12345, 'receipt_reference' => 'AUTO-NEXT'])->assertCreated();
+        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12445, 'receipt_reference' => 'AUTO-NEXT'])->assertCreated();
         $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Suspended']);
         $this->postJson("{$base}/subscriptions/{$next->id}/transition", [
@@ -150,6 +159,36 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Active']);
         $this->assertDatabaseHas('portal_events', ['action' => 'commercial.subscription_state_changed', 'actor_id' => null, 'subject_id' => $next->id]);
         $this->travelBack();
+    }
+
+    private function attachFeatureAddOn(string $base, string $subscription, array $input, string $child): string
+    {
+        $provider = DB::table('commercial_accounts')->where('id', $input['account_id'])->value('provider_id');
+        $other = $this->business('Organization');
+        $this->postJson($base.'/entitlements', ['code' => 'portal.exports', 'name' => 'Exports'])->assertCreated();
+        $offer = ['provider_id' => $provider, 'family' => 'tenant', 'name' => 'Exports'];
+        $addOn = $this->postJson($base.'/add_ons', $offer)->assertCreated()->json('id');
+        $this->postJson($base.'/add_ons', $offer)->assertConflict();
+        $publish = "{$base}/add_ons/{$addOn}/versions";
+        $release = ['plan_version_id' => $input['plan_version_id'], 'amount_paise' => 100, 'entitlements' => ['portal.exports']];
+        $this->postJson($publish, [...$release, 'plan_version_id' => Str::uuid7()->toString()])->assertUnprocessable();
+        $version = $this->postJson($publish, $release)->assertCreated()->assertJsonPath('version', 1)->json('id');
+        $later = $this->postJson($publish, [...$release, 'amount_paise' => 200])->assertCreated()->assertJsonPath('version', 2)->json('id');
+        $plan = DB::table('commercial_plan_versions')->where('id', $input['plan_version_id'])->value('plan_id');
+        $nextPlan = DB::table('commercial_plan_versions')->where('plan_id', $plan)->where('version', 2)->value('id');
+        $incompatible = $this->postJson($publish, [...$release, 'plan_version_id' => $nextPlan])->assertCreated()->json('id');
+        $this->getJson($base.'?section=add_on_versions')->assertOk()->assertJsonCount(3, 'data');
+
+        $attach = "{$base}/subscriptions/{$subscription}/add_ons";
+        $assignment = ['add_on_version_id' => $version, 'business_id' => $child];
+        $this->postJson($attach, [...$assignment, 'business_id' => $other])->assertUnprocessable();
+        $this->postJson($attach, [...$assignment, 'add_on_version_id' => $incompatible])->assertUnprocessable();
+        $this->postJson($attach, $assignment)->assertCreated();
+        $this->postJson($attach, $assignment)->assertOk();
+        $this->postJson($attach, [...$assignment, 'add_on_version_id' => $later])->assertConflict();
+        $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['add_on_version_id' => $version]);
+
+        return $version;
     }
 
     private function assertSubscriptionLifecycle(string $base, string $subscription, string $child, string $organization, string $otherChild, string $nextVersion): void

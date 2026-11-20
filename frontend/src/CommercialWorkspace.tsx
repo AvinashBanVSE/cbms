@@ -14,7 +14,18 @@ type Section =
   | "entitlements"
   | "plans"
   | "versions"
+  | "add_ons"
+  | "add_on_versions"
   | "subscriptions";
+const family: Field = {
+  name: "family",
+  label: "Plan family",
+  options: [
+    ["operator", "Operator"],
+    ["tenant", "Tenant"],
+    ["dealer", "Dealer"],
+  ],
+};
 const sections: Record<Section, { label: string; fields: Field[] }> = {
   accounts: {
     label: "Commercial accounts",
@@ -36,14 +47,30 @@ const sections: Record<Section, { label: string; fields: Field[] }> = {
     fields: [
       { name: "provider_id", label: "Service provider ID" },
       { name: "name", label: "Plan name" },
+      family,
+    ],
+  },
+  add_ons: {
+    label: "Feature Add-ons",
+    fields: [
+      { name: "provider_id", label: "Service provider ID" },
+      { name: "name", label: "Add-on name" },
+      family,
+    ],
+  },
+  add_on_versions: {
+    label: "Published Add-on Versions",
+    fields: [
+      { name: "add_on_id", label: "Add-on ID" },
+      { name: "plan_version_id", label: "Compatible Plan Version ID" },
       {
-        name: "family",
-        label: "Plan family",
-        options: [
-          ["operator", "Operator"],
-          ["tenant", "Tenant"],
-          ["dealer", "Dealer"],
-        ],
+        name: "amount_paise",
+        label: "Price per covered business in paise (INR)",
+        type: "number",
+      },
+      {
+        name: "entitlements",
+        label: "Feature entitlement codes (comma separated)",
       },
     ],
   },
@@ -160,14 +187,22 @@ export function CommercialWorkspace() {
         String(value).trim(),
       ]),
     );
-    const plan = String(body.plan_id ?? "");
     const split = (value: unknown) =>
       String(value ?? "")
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean);
-    if (section === "versions") {
-      delete body.plan_id;
+    let path = "commercial/" + section;
+    if (section === "versions" || section === "add_on_versions") {
+      const parent = section === "versions" ? "plans" : "add_ons";
+      const idField = section === "versions" ? "plan_id" : "add_on_id";
+      path =
+        "commercial/" +
+        parent +
+        "/" +
+        encodeURIComponent(String(body[idField])) +
+        "/versions";
+      delete body[idField];
       body.entitlements = split(body.entitlements);
     }
     if (section === "subscriptions") {
@@ -177,10 +212,6 @@ export function CommercialWorkspace() {
         delete body.business_ids;
     }
     return run(async () => {
-      const path =
-        section === "versions"
-          ? "commercial/plans/" + encodeURIComponent(plan) + "/versions"
-          : "commercial/" + section;
       const result = await (await portalRequest(path, body)).json();
       await load(1);
       setNotice(
@@ -191,6 +222,24 @@ export function CommercialWorkspace() {
       form.reset();
       setRenewalMode("manual");
       setGracePolicy("");
+    });
+  }
+
+  function attachAddOn(event: FormEvent<HTMLFormElement>, id: string) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    return run(async () => {
+      await portalRequest(
+        "commercial/subscriptions/" + encodeURIComponent(id) + "/add_ons",
+        {
+          add_on_version_id: String(fields.get("add_on_version_id")).trim(),
+          business_id: String(fields.get("business_id")).trim(),
+        },
+      );
+      form.reset();
+      await load(page);
+      setNotice("Feature Add-on attached to the term.");
     });
   }
 
@@ -372,7 +421,11 @@ export function CommercialWorkspace() {
           </>
         )}
         <button disabled={busy}>
-          {section === "versions" ? "Publish Plan Version" : "Create record"}
+          {section === "versions"
+            ? "Publish Plan Version"
+            : section === "add_on_versions"
+              ? "Publish Add-on Version"
+              : "Create record"}
         </button>
       </form>
       <button disabled={busy} onClick={() => run(() => load(1))}>
@@ -427,6 +480,29 @@ export function CommercialWorkspace() {
                       <button disabled={busy}>Apply subscription action</button>
                     </form>
                   )}
+                  {section === "subscriptions" &&
+                    item.effective_state === "Pending Activation" &&
+                    !item.invoice_id && (
+                      <details>
+                        <summary>Attach Feature Add-on</summary>
+                        <form
+                          data-operation="subscription-add-on"
+                          onSubmit={(event) =>
+                            attachAddOn(event, String(item.id))
+                          }
+                        >
+                          <label>
+                            Add-on Version ID
+                            <input name="add_on_version_id" required />
+                          </label>
+                          <label>
+                            Covered Business ID
+                            <input name="business_id" required />
+                          </label>
+                          <button disabled={busy}>Attach Add-on</button>
+                        </form>
+                      </details>
+                    )}
                   {section === "subscriptions" &&
                     state === "Active" &&
                     !item.renewal_id && (

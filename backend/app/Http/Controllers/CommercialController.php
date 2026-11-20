@@ -27,10 +27,11 @@ final class CommercialController
     public function index(Request $request): JsonResponse
     {
         $this->access->requirePermission('commercial.manage');
-        $data = $request->validate(['section' => 'required|in:accounts,plans,versions,subscriptions,entitlements']);
+        $data = $request->validate(['section' => 'required|in:accounts,plans,versions,subscriptions,entitlements,add_ons,add_on_versions']);
         $tables = [
             'accounts' => 'commercial_accounts', 'plans' => 'commercial_plans', 'versions' => 'commercial_plan_versions',
             'subscriptions' => 'commercial_subscriptions', 'entitlements' => 'commercial_entitlement_definitions',
+            'add_ons' => 'commercial_add_ons', 'add_on_versions' => 'commercial_add_on_versions',
         ];
         $section = $data['section'];
         $query = DB::table($tables[$section])->orderBy($section === 'entitlements' ? 'code' : 'id');
@@ -38,6 +39,8 @@ final class CommercialController
             $query->select('commercial_subscriptions.*')->addSelect([
                 'renewal_id' => DB::table('commercial_subscriptions as renewal')->select('id')
                     ->whereColumn('renewal.renewed_from_id', 'commercial_subscriptions.id'),
+                'invoice_id' => DB::table('commercial_invoices')->select('id')
+                    ->whereColumn('commercial_invoices.subscription_id', 'commercial_subscriptions.id'),
             ]);
         }
         $result = $query->simplePaginate(30);
@@ -45,15 +48,20 @@ final class CommercialController
             ? DB::table('commercial_subscription_coverage')->whereIn('subscription_id', $result->getCollection()->pluck('id'))
                 ->orderBy('business_id')->get()->groupBy('subscription_id')
             : collect();
+        $addOns = $section === 'subscriptions'
+            ? DB::table('commercial_subscription_add_ons')->whereIn('subscription_id', $result->getCollection()->pluck('id'))
+                ->orderBy('business_id')->orderBy('add_on_id')->get()->groupBy('subscription_id')
+            : collect();
         $today = now('Asia/Kolkata')->toDateString();
-        $result->through(function (object $row) use ($section, $coverage, $today): object {
-            if ($section === 'versions') {
+        $result->through(function (object $row) use ($section, $coverage, $addOns, $today): object {
+            if (in_array($section, ['versions', 'add_on_versions'], true)) {
                 $row->currency = 'INR';
                 $row->entitlements = json_decode($row->entitlements, true, flags: JSON_THROW_ON_ERROR);
                 $row->published_at = CarbonImmutable::parse($row->published_at, 'UTC')->utc()->toISOString();
             }
             if ($section === 'subscriptions') {
                 $row->covered_business_ids = $coverage->get($row->id, collect())->pluck('business_id')->all();
+                $row->add_ons = $addOns->get($row->id, collect())->all();
                 $row->effective_state = match (true) {
                     $row->state !== 'Cancelled' && $row->ends_before <= $today => 'Expired',
                     $row->state === 'Grace Period' && $row->grace_ends_before <= $today => 'Suspended',
@@ -263,7 +271,7 @@ final class CommercialController
         abort_if($identity === null, 404);
         $organization = $identity->kind === 'Organization' ? $identity->id : $identity->parent_id;
         $today = now('Asia/Kolkata')->toDateString();
-        $eligibleVersions = DB::table('commercial_subscription_coverage as coverage')
+        $eligibleTerms = DB::table('commercial_subscription_coverage as coverage')
             ->join('commercial_subscriptions as subscription', 'subscription.id', '=', 'coverage.subscription_id')
             ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
             ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
@@ -274,12 +282,17 @@ final class CommercialController
                         ->where('subscription.renewal_grace_policy', 'retain_features')->where('subscription.grace_ends_before', '>', $today);
                 });
             })->where('subscription.starts_on', '<=', $today)
-            ->where('subscription.ends_before', '>', $today)->select('subscription.plan_version_id');
-        $plans = DB::table('commercial_plan_versions')->whereIn('id', $eligibleVersions)->cursor();
+            ->where('subscription.ends_before', '>', $today);
+        $plans = DB::table('commercial_plan_versions')->whereIn('id', $eligibleTerms->clone()->select('subscription.plan_version_id'))
+            ->select('entitlements');
+        $addOns = DB::table('commercial_subscription_add_ons as assignment')
+            ->join('commercial_add_on_versions as version', 'version.id', '=', 'assignment.add_on_version_id')
+            ->where('assignment.business_id', $business)->whereIn('assignment.subscription_id', $eligibleTerms->select('subscription.id'))
+            ->select('version.entitlements');
 
         $features = [];
-        foreach ($plans as $plan) {
-            foreach (json_decode($plan->entitlements, true, flags: JSON_THROW_ON_ERROR) as $entitlement) {
+        foreach ($plans->unionAll($addOns)->cursor() as $source) {
+            foreach (json_decode($source->entitlements, true, flags: JSON_THROW_ON_ERROR) as $entitlement) {
                 if ($entitlement['type'] === 'feature' && $entitlement['composition'] === 'any') {
                     $features[$entitlement['code']] = true;
                 }

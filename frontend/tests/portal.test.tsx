@@ -932,6 +932,22 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
       return json({ id: "subscription1", state: "Pending Activation" });
     }
     if (path === "commercial/accounts") return json({ id: "account" });
+    if (path === "commercial/add_ons") {
+      expect(body).toEqual({
+        provider_id: "provider",
+        family: "tenant",
+        name: "Exports",
+      });
+      return json({ id: "exports" });
+    }
+    if (path === "commercial/add_ons/exports/versions") {
+      expect(body).toEqual({
+        plan_version_id: "version1",
+        amount_paise: "100",
+        entitlements: ["portal.exports"],
+      });
+      return json({ id: "exports-v1", version: 1 });
+    }
     throw Error("Commercial record unavailable");
   });
   await render();
@@ -1000,6 +1016,19 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
   expect(
     document.querySelector(form + ' input[name="renewal_lead_days"]'),
   ).toBeNull();
+  await change("add_ons");
+  set("provider_id", "provider");
+  set("name", "Exports");
+  set("family", "tenant");
+  await submit(form);
+  expect(document.body.textContent).toContain("Saved: exports");
+  await change("add_on_versions");
+  set("add_on_id", "exports");
+  set("plan_version_id", "version1");
+  set("amount_paise", "100");
+  set("entitlements", "portal.exports");
+  await submit(form);
+  expect(document.body.textContent).toContain("Saved: exports-v1");
   await change("plans");
   set("provider_id", "unknown");
   set("name", "Plan");
@@ -1039,6 +1068,13 @@ it("changes a subscription state and resolves features for a covered business", 
         ],
         next_page_url: null,
       });
+    if (path === "commercial/subscriptions/contract/add_ons") {
+      expect(body).toEqual({
+        business_id: "shop",
+        add_on_version_id: "exports-v1",
+      });
+      return json(body);
+    }
     if (path === "commercial/subscriptions/contract/transition") {
       expect(body?.expected_state).toBe(state);
       if (!settled)
@@ -1074,6 +1110,17 @@ it("changes a subscription state and resolves features for a covered business", 
   const transition = "form[data-operation=subscription-transition]";
   const lookup = "form[data-operation=effective-entitlements]";
   expect(document.querySelectorAll(transition)).toHaveLength(1);
+  const attachment = "form[data-operation=subscription-add-on]";
+  document.querySelector<HTMLInputElement>(
+    attachment + ' input[name="business_id"]',
+  )!.value = "shop";
+  document.querySelector<HTMLInputElement>(
+    attachment + ' input[name="add_on_version_id"]',
+  )!.value = "exports-v1";
+  await submit(attachment);
+  expect(document.body.textContent).toContain(
+    "Feature Add-on attached to the term.",
+  );
   const apply = async (action: string, reason: string) => {
     input("action", action);
     input("reason", reason);

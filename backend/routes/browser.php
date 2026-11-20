@@ -7,6 +7,7 @@ use App\Authorization\MainPortalAccess;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
+use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\InstallationController;
@@ -97,6 +98,9 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('entitlements', [CommercialController::class, 'entitlement']);
         Route::post('plans', [CommercialController::class, 'plan']);
         Route::post('plans/{plan}/versions', [CommercialController::class, 'publish'])->whereUuid('plan');
+        Route::post('add_ons', [CommercialAddOnController::class, 'store']);
+        Route::post('add_ons/{addOn}/versions', [CommercialAddOnController::class, 'publish'])->whereUuid('addOn');
+        Route::post('subscriptions/{subscription}/add_ons', [CommercialAddOnController::class, 'attach'])->whereUuid('subscription');
         Route::post('subscriptions', [CommercialController::class, 'subscription']);
         Route::post('subscriptions/{subscription}/transition', [CommercialController::class, 'transition'])->whereUuid('subscription');
         Route::post('subscriptions/{subscription}/renew', [CommercialController::class, 'renew'])->whereUuid('subscription');

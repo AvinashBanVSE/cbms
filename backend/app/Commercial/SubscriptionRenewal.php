@@ -104,6 +104,7 @@ final class SubscriptionRenewal
                 'plan_version_id' => $version, 'starts_on' => $startsOn, 'reason' => $reason ?? 'Scheduled automatic renewal',
             ]);
             if ($automatic) {
+                SubscriptionAddOns::carryForward($subscription, $id);
                 $issuedOn = $today->toDateString();
                 SubscriptionTerms::issueInvoice((object) $terms, $issuedOn, max($issuedOn, $startsOn), $actor);
             }
