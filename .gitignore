@@ -1,0 +1,5 @@
+/.openhands/
+CBM-Foundation-Stages-4-to-7-Handoff.md
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

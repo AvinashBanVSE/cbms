@@ -9,6 +9,7 @@ use App\Commercial\SubscriptionAddOns;
 use App\Commercial\SubscriptionCoverage;
 use App\Commercial\SubscriptionRenewal;
 use App\Commercial\SubscriptionTerms;
+use App\Commercial\UsageMeasurement;
 use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -24,6 +25,7 @@ final class CommercialController
     public function __construct(
         private readonly MainPortalAccess $access,
         private readonly SubscriptionRenewal $renewals,
+        private readonly UsageMeasurement $usage,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -340,6 +342,33 @@ final class CommercialController
             ...($capacities === [] ? [] : ['capacities' => $capacities]),
         ])
             ->header('Cache-Control', 'no-store');
+    }
+
+    /** Record consumption against a Usage Limit for a covered business (§14.5). */
+    public function recordUsage(Request $request): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $data = $request->validate([
+            'usage_limit' => 'required|string|exists:commercial_usage_limits,code',
+            'business_id' => 'required|uuid',
+            'quantity' => 'required|integer|min:0',
+            'idempotency_key' => 'sometimes|nullable|string|max:80',
+        ]);
+
+        return response()->json($this->usage->record(
+            $data['usage_limit'], $data['business_id'], (int) $data['quantity'],
+            ['idempotency_key' => $data['idempotency_key'] ?? null],
+        ), 201)->header('Cache-Control', 'no-store');
+    }
+
+    /** Authorized usage status (consumed, threshold, period, limit) for a business (§14.5). */
+    public function usageStatus(string $business): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+
+        return response()->json([
+            'business_id' => $business, 'usage' => $this->usage->status($business),
+        ])->header('Cache-Control', 'no-store');
     }
 
     private function create(string $table, array $data, string $action): JsonResponse
