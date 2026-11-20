@@ -95,7 +95,10 @@ final class ProviderAccountTest extends TestCase
         $recovery = ['code' => $code, 'reason' => 'Verified account recovery'];
         $this->postJson("/api/v1/providers/{$other}/users/recover", $recovery)->assertNotFound();
         $this->postJson($staff.'/recover', $recovery)->assertOk()->assertJsonPath('delivery', 'sent');
-        preg_match('/Temporary password: (\w+)/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $temporary);
+        $recoveryBody = $transport->messages()->last()->getOriginalMessage()->getTextBody();
+        $this->assertStringNotContainsString('://', $recoveryBody);
+        $this->assertStringContainsString($code, $recoveryBody);
+        preg_match('/Temporary password: (\w+)/', $recoveryBody, $temporary);
         $this->postJson('/api/v1/logout')->assertNoContent();
         $this->postJson('/api/v1/login', $login)->assertUnauthorized();
         $this->postJson('/api/v1/organization-setup/verify', ['code' => $code, 'temporary_password' => $temporary[1]])->assertOk();

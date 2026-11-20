@@ -53,6 +53,35 @@ final class BusinessLifecycleTest extends TestCase
         $this->assertDatabaseHas('business_lifecycle_history', ['business_id' => $shop, 'operation_id' => $suspend['operation_id'], 'to_state' => 'Suspended']);
     }
 
+    public function test_restoration_preserves_a_later_independent_child_transition(): void
+    {
+        $organization = $this->business('Organization');
+        $shop = $this->business('Shop', $organization);
+        $distributor = $this->business('Distributor', $organization);
+        $this->authenticate();
+
+        $organizationPath = "/api/v1/businesses/{$organization}/lifecycle";
+        $suspend = $this->command('Suspended', 0);
+        $this->postJson($organizationPath, $suspend)->assertOk()->assertJsonPath('changed_businesses', 3);
+        $snapshot = DB::table('business_lifecycle_operations')->where('id', $suspend['operation_id'])->value('snapshot');
+
+        $independent = $this->command('Deactivated', 1);
+        $this->postJson("/api/v1/businesses/{$shop}/lifecycle", $independent)->assertOk()->assertJsonPath('state', 'Deactivated');
+        $restore = $this->command('Active', 1);
+        $this->postJson($organizationPath, $restore)->assertOk()
+            ->assertJsonPath('restores_operation_id', $suspend['operation_id'])->assertJsonPath('changed_businesses', 2);
+        $this->assertSame($snapshot, DB::table('business_lifecycle_operations')->where('id', $suspend['operation_id'])->value('snapshot'));
+        $this->assertDatabaseHas('business_identities', [
+            'id' => $shop, 'parent_id' => $organization, 'operational_state' => 'Deactivated',
+            'lifecycle_version' => 2, 'lifecycle_operation_id' => $independent['operation_id'],
+        ]);
+        $this->assertDatabaseHas('business_identities', [
+            'id' => $distributor, 'parent_id' => $organization, 'operational_state' => 'Active',
+            'lifecycle_version' => 2, 'lifecycle_operation_id' => $restore['operation_id'],
+        ]);
+        $this->assertDatabaseMissing('business_lifecycle_history', ['business_id' => $shop, 'operation_id' => $restore['operation_id']]);
+    }
+
     public function test_children_cannot_activate_under_an_inactive_organization_and_closure_is_terminal(): void
     {
         $organization = $this->business('Organization', state: 'Draft');

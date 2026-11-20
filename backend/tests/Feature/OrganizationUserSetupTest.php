@@ -58,7 +58,7 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson("{$url}/organization-users/reissue", ['code' => $code])->assertOk()->assertJsonPath('delivery', 'sent');
         $this->assertSame($mode === 'temporary_password' ? null : now()->addMinutes(2)->toDateTimeString(), $setup->value('otp_expires_at'));
         $body = $transport->messages()->last()->getOriginalMessage()->getTextBody();
-        $this->assertStringNotContainsString('https://', $body);
+        $this->assertStringNotContainsString('://', $body);
         $this->assertStringContainsString($code, $body);
         $this->assertCount(2, $transport->messages());
 
