@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CommercialWorkspace } from "./CommercialWorkspace";
 import { AuditTrail } from "./AuditTrail";
+import { AuthenticatorSettings } from "./AuthenticatorSettings";
+import { LegalIdentities } from "./LegalIdentities";
 import { portalRequest, PortalRequestError } from "./api";
 import "./portal.css";
 import { type ActiveAccessDelegation } from "./OrganizationDelegations";
@@ -42,6 +44,7 @@ const titles = {
 const administration = {
   services: ["Services", "Service catalogue"],
   businesses: ["Businesses", "Business structure"],
+  identities: ["Legal identities", "Legal identities"],
   users: ["Organization users", "Organization users"],
   commercial: ["Commercial", "Commercial management"],
   audit: ["Audit Trail", "Audit Trail"],
@@ -110,6 +113,7 @@ export function Portal() {
   const [workspace, setWorkspace] = useState<WorkspaceAccess>();
   const [section, setSection] = useState<AdministrationSection>();
   const [setupAccount, setSetupAccount] = useState(false);
+  const [needsAuthenticator, setNeedsAuthenticator] = useState(false);
   const [stage, setStage] = useState<Stage>();
   const [categories, setCategories] = useState<Record<string, string>>();
   const [notice, setNotice] = useState("");
@@ -166,7 +170,13 @@ export function Portal() {
     setNotice("");
     try {
       if (stage === "ready") {
-        await portalRequest("login", body);
+        const response = await portalRequest("login", body);
+        if (response.status === 202) {
+          setNeedsAuthenticator(true);
+          setNotice("Enter the current code from your authenticator.");
+          return;
+        }
+        setNeedsAuthenticator(false);
         await loadWorkspace();
       } else {
         const path = stage === "setup_required" ? "setup" : "owner";
@@ -303,6 +313,8 @@ export function Portal() {
                     <AuditTrail />
                   ) : section === "provider_users" ? (
                     <ProviderAccounts />
+                  ) : section === "identities" ? (
+                    <LegalIdentities />
                   ) : section === "users" ? (
                     <OrganizationUsers />
                   ) : section === "businesses" ? (
@@ -321,6 +333,7 @@ export function Portal() {
               !workspace.provider_directory && (
                 <p>No workspace is assigned to this account.</p>
               )}
+            <AuthenticatorSettings />
             <button
               onClick={async () => {
                 try {
@@ -375,6 +388,18 @@ export function Portal() {
                     />
                   </label>
                 ))}
+                {stage === "ready" && needsAuthenticator && (
+                  <label>
+                    Authenticator code
+                    <input
+                      name="authenticator_code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      pattern="[0-9]{6}"
+                      required
+                    />
+                  </label>
+                )}
                 <button disabled={busy}>{titles[stage]}</button>
               </form>
               {stage === "ready" && (

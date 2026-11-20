@@ -14,6 +14,7 @@ final class PermissionCatalogue
         'service_catalogue.create' => null,
         'business_structure.view' => 'businesses',
         'business_structure.create' => null,
+        'business_identity.verify' => 'identities',
         'business_structure.lifecycle' => null,
         'service_provider.migrate' => null,
         'organization_users.manage' => 'users',

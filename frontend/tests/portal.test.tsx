@@ -233,6 +233,98 @@ it("displays a failed login and keeps the sign-in form available", async () => {
   expect(document.body.textContent).toContain("Sign-in denied");
 });
 
+it("requires an authenticator code and exposes enrollment controls only after login", async () => {
+  let enabled = true;
+  let signedIn = false;
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access") {
+      if (!signedIn) throw new PortalRequestError("Sign in", 401);
+      return json({ ...adminWorkspace, administration: [] });
+    }
+    if (path === "login") {
+      if (!body?.authenticator_code)
+        return Response.json(
+          { stage: "authenticator_required" },
+          { status: 202 },
+        );
+      expect(body.authenticator_code).toBe("003234");
+      signedIn = true;
+      return new Response(null, { status: 204 });
+    }
+    if (path === "authenticator") return json({ enabled });
+    if (path === "authenticator/disable") {
+      enabled = false;
+      return json({ enabled });
+    }
+    if (path === "authenticator/prepare")
+      return json({ setup_key: "TEST-AUTHENTICATOR-KEY" });
+    if (path === "authenticator/confirm") return json({ enabled: true });
+    throw new Error(path);
+  });
+  await render();
+  expect(document.body.textContent).not.toContain("Authenticator settings");
+  input("email", "factor@example.test");
+  input("password", "test-password");
+  input("code", "AA1234");
+  await submit();
+  expect(document.body.textContent).toContain("Enter the current code");
+  input("authenticator_code", "003234");
+  await submit();
+  await click("Load authenticator settings");
+  const settings = 'form[data-operation="authenticator-settings"]';
+  input("password", "test-password");
+  input("code", "103234");
+  await submit(settings);
+  expect(document.body.textContent).toContain("Authenticator disabled.");
+  input("password", "test-password");
+  await submit(settings);
+  expect(document.body.textContent).toContain("TEST-AUTHENTICATOR-KEY");
+  input("password", "test-password");
+  input("code", "203234");
+  await submit(settings);
+  expect(document.body.textContent).toContain("Authenticator enabled.");
+});
+
+it("records a reviewed legal identity and associates it with a business", async () => {
+  request.mockImplementation(async (path, body) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["identities"] });
+    if (path === "legal-identities") {
+      if (!body?.evidence_reviewed)
+        throw new Error("Review the legal identity evidence first.");
+      expect(body).toEqual({
+        legal_name: "Legal A",
+        evidence_reference: "review-1",
+        evidence_reviewed: true,
+      });
+      return json({ id: "legal-1" });
+    }
+    if (path === "businesses/shop/legal-identity") {
+      expect(body).toEqual({ legal_identity_id: "legal-1" });
+      return json(body);
+    }
+    throw new Error(path);
+  });
+  await render();
+  input("legal_name", "Legal A");
+  input("evidence_reference", "review-1");
+  await submit('form[data-operation="record-legal-identity"]');
+  expect(document.body.textContent).toContain(
+    "Review the legal identity evidence first.",
+  );
+  document.querySelector<HTMLInputElement>(
+    '[name="evidence_reviewed"]',
+  )!.checked = true;
+  await submit('form[data-operation="record-legal-identity"]');
+  expect(document.body.textContent).toContain("legal-1");
+  input("business_id", "shop");
+  input("legal_identity_id", "legal-1");
+  await submit('form[data-operation="attach-legal-identity"]');
+  expect(document.body.textContent).toContain("Legal identity associated.");
+});
+
 it("opens only the assigned workspace without service catalogue access", async () => {
   request.mockImplementation(async (path) => {
     if (path === "installation") return json({ stage: "ready" });
@@ -529,6 +621,7 @@ it("reports catalogue and sign-out errors", async () => {
 
 it("creates an Organization, displays its ownership and creates a Shop", async () => {
   let requestedPage = 0;
+  let checkCount = 0;
   request.mockImplementation(async (path, body) => {
     switch (path) {
       case "installation":
@@ -549,9 +642,16 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
               professional_name: "North Shop",
               kind: "Shop",
               legal_name: "North",
+              legal_identity_id: "legal-1",
               provider_id: "provider-1",
               tenant_id: "tenant-1",
               parent_id: "organization-1",
+              owners: [{ name: "Asha", owner_id: "owner-1" }],
+            },
+            {
+              id: "organization-1",
+              professional_name: "Western Network",
+              kind: "Organization",
               owners: [{ name: "Asha", owner_id: "owner-1" }],
             },
           ],
@@ -561,6 +661,13 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
         if (body?.professional_name === "Duplicate")
           throw Error("Unable to register");
         return json({ id: "new-business" });
+      case "businesses/organization-1/ownership-check":
+        checkCount++;
+        if (checkCount === 1)
+          return json({ consistent: true, business_ids: [] });
+        if (checkCount === 2)
+          return json({ consistent: false, business_ids: ["business-1"] });
+        throw Error("Ownership check unavailable");
       default:
         throw Error(path);
     }
@@ -568,6 +675,17 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
   await render();
   await click("Businesses");
   expect(document.body.textContent).toContain("Asha (owner-1)");
+  expect(document.body.textContent).toContain("legal-1");
+  await click("Check ownership links");
+  expect(document.body.textContent).toContain(
+    "Organization ownership links are consistent",
+  );
+  await click("Check ownership links");
+  expect(document.body.textContent).toContain(
+    "Review ownership links for: business-1",
+  );
+  await click("Check ownership links");
+  expect(document.body.textContent).toContain("Ownership check unavailable");
   await click("Next");
   expect(requestedPage).toBe(2);
   await click("Previous");

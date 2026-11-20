@@ -62,6 +62,38 @@ final class BusinessStructureTest extends TestCase
         $this->assertDatabaseCount('ownership_holders', 1);
     }
 
+    public function test_verified_legal_identity_is_explicit_and_preserves_ownership_links(): void
+    {
+        $main = $this->authenticate(true);
+        $organization = $this->create(['kind' => 'Organization', 'provider_id' => $main, 'new_owner_name' => 'Owner']);
+        $shop = $this->create(['kind' => 'Shop', 'parent_id' => $organization]);
+        $input = ['legal_name' => 'Legal name', 'evidence_reference' => 'review-ledger-0001', 'evidence_reviewed' => true];
+        $this->postJson('/api/v1/legal-identities', $input)->assertForbidden();
+        DB::table('portal_grants')->insert([
+            'business_id' => $main, 'user_id' => User::where('code', 'AA0001')->value('id'),
+            'permission' => 'business_identity.verify',
+        ]);
+        $this->postJson('/api/v1/legal-identities', [...$input, 'evidence_reviewed' => false])->assertUnprocessable();
+        $legal = $this->postJson('/api/v1/legal-identities', $input)->assertCreated()->json('id');
+        $before = DB::table('ownership_links')->orderBy('id')->get()->toArray();
+        $this->postJson("/api/v1/businesses/{$organization}/legal-identity", ['legal_identity_id' => $legal])->assertOk();
+        $this->assertDatabaseMissing('business_legal_identity_links', ['business_id' => $shop]);
+        $this->postJson("/api/v1/businesses/{$shop}/legal-identity", ['legal_identity_id' => $legal])->assertOk();
+        $this->postJson("/api/v1/businesses/{$shop}/legal-identity", ['legal_identity_id' => $legal])->assertOk();
+        $different = $this->postJson('/api/v1/legal-identities', [...$input, 'legal_name' => 'Another identity'])->assertCreated()->json('id');
+        $this->postJson("/api/v1/businesses/{$shop}/legal-identity", ['legal_identity_id' => $different])->assertConflict();
+        $this->assertEquals($before, DB::table('ownership_links')->orderBy('id')->get()->toArray());
+        $this->getJson('/api/v1/businesses')->assertOk()
+            ->assertJsonFragment(['id' => $shop, 'legal_identity_id' => $legal, 'professional_name' => 'Shop'])
+            ->assertJsonMissing(['evidence_reference' => 'review-ledger-0001']);
+        $check = "/api/v1/businesses/{$organization}/ownership-check";
+        $this->getJson($check)->assertExactJson(['consistent' => true, 'business_ids' => []]);
+        DB::table('ownership_links')->where('business_id', $shop)->delete();
+        $this->getJson($check)->assertExactJson(['consistent' => false, 'business_ids' => [$shop]]);
+        $this->getJson("/api/v1/businesses/{$shop}/ownership-check")->assertNotFound();
+        $this->invalid(['kind' => 'Shop', 'parent_id' => $organization], 'legal_name');
+    }
+
     private function authenticate(bool $allowed): string
     {
         $portal = Str::uuid7()->toString();
@@ -81,7 +113,8 @@ final class BusinessStructureTest extends TestCase
 
     private function create(array $data): string
     {
-        return $this->postJson('/api/v1/businesses', $data + ['professional_name' => $data['kind'], 'legal_name' => 'Legal name'])
+        return $this->postJson('/api/v1/businesses', $data + ['professional_name' => $data['kind']]
+            + (in_array($data['kind'], ['Shop', 'Distributor'], true) ? [] : ['legal_name' => 'Legal name']))
             ->assertCreated()->json('id');
     }
 

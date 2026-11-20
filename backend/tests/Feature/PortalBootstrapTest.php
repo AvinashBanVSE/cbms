@@ -54,7 +54,7 @@ final class PortalBootstrapTest extends TestCase
         ]);
         $this->getJson('/api/v1/services/categories')->assertOk()->assertJsonCount(15);
         $this->getJson('/api/v1/workspace-access')->assertOk()->assertHeader('Cache-Control', 'no-store, private')
-            ->assertExactJson(['administration' => ['services', 'businesses', 'users', 'commercial', 'provider_users', 'audit'], 'mapping_contexts' => [], 'delegations' => []]);
+            ->assertExactJson(['administration' => ['services', 'businesses', 'identities', 'users', 'commercial', 'provider_users', 'audit'], 'mapping_contexts' => [], 'delegations' => []]);
         $this->getJson('/api/v1/audit-trail')->assertOk();
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');

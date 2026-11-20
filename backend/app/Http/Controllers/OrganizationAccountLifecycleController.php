@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Accounts\Authenticator;
 use App\Authorization\MainPortalAccess;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -60,6 +61,7 @@ final class OrganizationAccountLifecycleController
             }
             if ($next === 'Terminated') {
                 DB::table('users')->where('id', $id)->update(['password' => Hash::make(Str::random(64))]);
+                Authenticator::revokeForTermination($id);
                 DB::table('organization_user_setups')->where('user_id', $id)->delete();
                 DB::table('customer_business_associations')->where('user_id', $id)->update(['active' => false]);
             }

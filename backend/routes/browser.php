@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Accounts\Authenticator;
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\ProviderAccess;
 use App\Http\Controllers\AccountRecoveryController;
 use App\Http\Controllers\AuditTrailController;
+use App\Http\Controllers\AuthenticatorController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
@@ -15,6 +17,7 @@ use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\CredentialSettingsController;
 use App\Http\Controllers\InstallationController;
+use App\Http\Controllers\LegalIdentityController;
 use App\Http\Controllers\OrganizationAccessController;
 use App\Http\Controllers\OrganizationAccountLifecycleController;
 use App\Http\Controllers\OrganizationCredentialController;
@@ -30,11 +33,16 @@ use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
     Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::get('authenticator', [AuthenticatorController::class, 'show']);
+    Route::post('authenticator/prepare', [AuthenticatorController::class, 'prepare'])->middleware('throttle:5,1,authenticator-prepare');
+    Route::post('authenticator/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:5,1,authenticator-confirm');
+    Route::post('authenticator/disable', [AuthenticatorController::class, 'disable'])->middleware('throttle:5,1,authenticator-disable');
     Route::get('credential-settings', [CredentialSettingsController::class, 'show']);
     Route::post('credential-settings', [CredentialSettingsController::class, 'update']);
     Route::get('provider-organizations', [ProviderUserController::class, 'organizations']);
@@ -49,22 +57,60 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
         Route::post('installation/owner', [InstallationController::class, 'owner'])->middleware('throttle:5,1,owner');
         Route::post('login', function (Request $request) {
-            $credentials = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email', 'password' => 'required|string']);
+            $input = $request->validate([
+                'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email',
+                'password' => 'required|string',
+                'authenticator_code' => 'sometimes|required|regex:/^[0-9]{6}$/D',
+            ]);
+            $code = $input['authenticator_code'] ?? null;
+            unset($input['authenticator_code']);
+            $credentials = $input;
             $version = null;
-            $authenticated = DB::transaction(static function () use ($credentials, &$version): bool {
+            $factorVersion = null;
+            $needsCode = false;
+            $factorThrottled = false;
+            $authenticated = DB::transaction(static function () use ($credentials, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled): bool {
                 // Serialize password checking and Laravel's optional rehash with credential changes.
                 DB::table('users')->where('code', $credentials['code'])->lockForUpdate()->first(['id']);
 
-                return Auth::attemptWhen($credentials, static function ($user) use (&$version): bool {
+                return Auth::attemptWhen($credentials, static function ($user) use ($code, &$version, &$factorVersion, &$needsCode, &$factorThrottled): bool {
                     $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
                     $version = $account === null ? null : (int) $account->session_version;
+                    if ($account !== null && $account->state !== 'Active') {
+                        return false;
+                    }
+                    $factor = DB::table('user_authenticators')->where('user_id', $user->getAuthIdentifier())->first();
+                    $factorVersion = $factor === null ? null : (int) $factor->version;
+                    if ($factor?->secret === null) {
+                        return true;
+                    }
+                    $needsCode = $code === null;
+                    if ($needsCode) {
+                        return false;
+                    }
+                    $limitKey = 'authenticator-login:'.$user->getAuthIdentifier();
+                    $factorThrottled = RateLimiter::tooManyAttempts($limitKey, 5);
+                    if ($factorThrottled) {
+                        return false;
+                    }
+                    if (! Authenticator::consume($factor, $code)) {
+                        RateLimiter::hit($limitKey, 60);
 
-                    return $account === null || $account->state === 'Active';
+                        return false;
+                    }
+                    RateLimiter::clear($limitKey);
+
+                    return true;
                 });
             });
+            if ($needsCode) {
+                return response()->json(['stage' => 'authenticator_required'], 202)->header('Cache-Control', 'no-store');
+            }
+            abort_if($factorThrottled, 429);
             abort_unless($authenticated, 401);
             $request->session()->regenerate();
             $request->session()->put(ValidateOrganizationSession::VERSION, $version);
+            $request->session()->put(Authenticator::SESSION_VERSION, $factorVersion);
 
             return response()->noContent();
         })->middleware('throttle:5,1,login');
@@ -142,6 +188,9 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('provider-migrations/execute', [ServiceProviderMigrationController::class, 'execute']);
     Route::get('businesses', [BusinessStructureController::class, 'index']);
     Route::post('businesses', [BusinessStructureController::class, 'store']);
+    Route::post('legal-identities', [LegalIdentityController::class, 'store']);
+    Route::post('businesses/{business}/legal-identity', [LegalIdentityController::class, 'attach'])->whereUuid('business');
+    Route::get('businesses/{organization}/ownership-check', [BusinessStructureController::class, 'checkOwnership'])->whereUuid('organization');
     Route::get('services', [ServiceRegistryController::class, 'index']);
     Route::post('services', [ServiceRegistryController::class, 'createService']);
     Route::get('services/{service}/capabilities', [ServiceRegistryController::class, 'capabilities'])->whereUuid('service');

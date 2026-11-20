@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Accounts\Authenticator;
 use App\Accounts\SetupDelivery;
 use App\Accounts\UserCode;
 use App\Authorization\MainPortalAccess;
@@ -70,6 +71,7 @@ final class ProviderUserController
             DB::table('provider_account_permissions')->where('user_id', $account->user_id)->delete();
             DB::table('provider_user_setups')->where('user_id', $account->user_id)->delete();
             DB::table('users')->where('id', $account->user_id)->update(['password' => Hash::make(Str::random(64))]);
+            Authenticator::revokeForTermination($account->user_id);
             $this->record('provider_user.terminated', $account->user_id, $provider, ['reason' => $input['reason']]);
         }, attempts: 3);
 

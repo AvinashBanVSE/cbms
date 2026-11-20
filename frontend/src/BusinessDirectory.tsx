@@ -8,6 +8,7 @@ interface Business {
   kind: string;
   professional_name: string;
   legal_name: string | null;
+  legal_identity_id?: string | null;
   operational_state?: string;
   parent_id: string | null;
   provider_id: string | null;
@@ -75,6 +76,24 @@ export function BusinessDirectory() {
     }
   }
 
+  async function checkOwnership(id: string) {
+    setMessage("");
+    try {
+      const result = await (
+        await portalRequest(
+          "businesses/" + encodeURIComponent(id) + "/ownership-check",
+        )
+      ).json();
+      setMessage(
+        result.consistent
+          ? "Organization ownership links are consistent."
+          : "Review ownership links for: " + result.business_ids.join(", "),
+      );
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+
   return (
     <>
       <p role="status">{message}</p>
@@ -91,10 +110,12 @@ export function BusinessDirectory() {
           Professional name
           <input name="professional_name" maxLength={200} required />
         </label>
-        <label>
-          Legal name
-          <input name="legal_name" maxLength={200} required={!child} />
-        </label>
+        {!child && (
+          <label>
+            Legal name
+            <input name="legal_name" maxLength={200} required />
+          </label>
+        )}
         {kind === "Organization" && (
           <label>
             Service provider ID
@@ -131,6 +152,11 @@ export function BusinessDirectory() {
           {directory.data.map((business) => (
             <article key={business.id}>
               <h3>{business.professional_name}</h3>
+              {business.kind === "Organization" && (
+                <button onClick={() => checkOwnership(business.id)}>
+                  Check ownership links
+                </button>
+              )}
               <dl>
                 <dt>Type</dt>
                 <dd>{business.kind}</dd>
@@ -140,6 +166,12 @@ export function BusinessDirectory() {
                   <>
                     <dt>Legal name</dt>
                     <dd>{business.legal_name}</dd>
+                  </>
+                )}
+                {business.legal_identity_id && (
+                  <>
+                    <dt>Verified Legal Identity ID</dt>
+                    <dd>{business.legal_identity_id}</dd>
                   </>
                 )}
                 {business.provider_id && (

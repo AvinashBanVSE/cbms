@@ -24,7 +24,9 @@ final class BusinessStructureController
 
         $directory = DB::table('business_identities as business')
             ->leftJoin('customer_tenants as tenant', 'business.id', '=', 'tenant.organization_id')
-            ->select('business.*', 'tenant.id as tenant_id', 'tenant.provider_id')
+            ->leftJoin('business_legal_identity_links as legal_link', 'legal_link.business_id', '=', 'business.id')
+            ->leftJoin('legal_identities as legal', 'legal.id', '=', 'legal_link.legal_identity_id')
+            ->select('business.*', 'tenant.id as tenant_id', 'tenant.provider_id', 'legal_link.legal_identity_id', 'legal.legal_name as verified_legal_name')
             ->orderBy('business.id')->simplePaginate(30);
 
         $owners = DB::table('ownership_links')->join('ownership_holders', 'ownership_holders.id', '=', 'ownership_links.owner_id')
@@ -32,6 +34,8 @@ final class BusinessStructureController
             ->select('business_id', 'owner_id', 'ownership_holders.name')->get()->groupBy('business_id');
         $directory->through(static function (object $business) use ($owners): object {
             $business->owners = $owners->get($business->id, []);
+            $business->legal_name = $business->verified_legal_name ?? $business->legal_name;
+            unset($business->verified_legal_name);
 
             return $business;
         });
@@ -57,6 +61,9 @@ final class BusinessStructureController
             $parent = $data['parent_id'] ?? null;
             $provider = $data['provider_id'] ?? null;
             $ownerIds = $this->resolveOwners($data, $parent);
+            if ($parent !== null && isset($data['legal_name'])) {
+                throw ValidationException::withMessages(['legal_name' => 'Associate an explicitly verified legal identity after creating this business.']);
+            }
             if ($provider !== null) {
                 $identity = DB::table('business_identities')->where('id', $provider)->lockForUpdate()->first(['kind', 'operational_state']);
                 if ($identity === null || ! in_array($identity->kind, ['Main Portal', 'Sub-Portal'], true)
@@ -91,6 +98,26 @@ final class BusinessStructureController
 
             return response()->json(['id' => $id], 201);
         });
+    }
+
+    public function checkOwnership(string $organization): JsonResponse
+    {
+        $this->access->requirePermission('business_structure.view');
+        abort_unless(DB::table('business_identities')->where(['id' => $organization, 'kind' => 'Organization'])->exists(), 404);
+        $rows = DB::table('business_identities as business')->leftJoin('ownership_links as link', 'business.id', '=', 'link.business_id')
+            ->where(fn ($query) => $query->where('business.id', $organization)->orWhere('business.parent_id', $organization))
+            ->orderBy('link.owner_id')->get(['business.id', 'business.kind', 'link.owner_id'])->groupBy('id');
+        $expected = $rows->get($organization)->pluck('owner_id')->filter()->values()->all();
+        $inconsistent = $rows->filter(function ($links, string $business) use ($organization, $expected): bool {
+            if ($business === $organization) {
+                return $expected === [];
+            }
+
+            return ! in_array($links->first()->kind, ['Shop', 'Distributor'], true)
+                || $links->pluck('owner_id')->filter()->values()->all() !== $expected;
+        })->keys()->sort()->values();
+
+        return response()->json(['consistent' => $inconsistent->isEmpty(), 'business_ids' => $inconsistent])->header('Cache-Control', 'no-store');
     }
 
     private function resolveOwners(array $data, ?string $parent): array
