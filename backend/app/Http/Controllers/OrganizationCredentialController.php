@@ -25,7 +25,7 @@ final class OrganizationCredentialController
             'otp' => 'nullable|string|regex:/^[0-9]{6}$/',
         ]);
 
-        DB::transaction(function () use ($request, $data): void {
+        $session = DB::transaction(function () use ($data): ?array {
             $setup = $this->pendingSetup(false)->join('users', 'users.id', '=', 'setup.user_id')
                 ->where('users.code', $data['code'])->lockForUpdate()->first(['setup.*']);
             $provider = $setup === null;
@@ -34,22 +34,38 @@ final class OrganizationCredentialController
                     ->where('users.code', $data['code'])->lockForUpdate()->first(['setup.*']);
             }
             abort_if($setup === null, 422);
-            if ($setup->mode !== 'otp') {
-                $this->requireProof($data['temporary_password'] ?? '', $setup->temporary_hash, $setup->temporary_expires_at);
-            }
-            if ($setup->mode !== 'temporary_password') {
-                $this->requireProof($data['otp'] ?? '', $setup->otp_hash, $setup->otp_expires_at);
+            $issued = DB::table($provider ? 'provider_user_setups' : 'organization_user_setups')->where('user_id', $setup->user_id);
+            $blockedUntil = $setup->verification_blocked_until;
+            abort_if($blockedUntil !== null && now()->lt($blockedUntil), 429);
+            $temporaryValid = $setup->mode === 'otp'
+                || $this->validProof($data['temporary_password'] ?? '', $setup->temporary_hash, $setup->temporary_expires_at);
+            $otpValid = $setup->mode === 'temporary_password'
+                || $this->validProof($data['otp'] ?? '', $setup->otp_hash, $setup->otp_expires_at);
+            if (! $temporaryValid || ! $otpValid) {
+                if ($setup->temporary_hash !== null || $setup->otp_hash !== null) {
+                    $failures = $blockedUntil !== null ? 1 : (int) $setup->verification_failures + 1;
+                    $issued->update([
+                        'verification_failures' => $failures,
+                        'verification_blocked_until' => $failures >= 3 ? now()->addHour() : null,
+                    ]);
+                }
+
+                return null;
             }
 
             $token = Str::random(64);
-            DB::table($provider ? 'provider_user_setups' : 'organization_user_setups')->where('user_id', $setup->user_id)->update([
+            $issued->update([
                 'temporary_hash' => null, 'temporary_expires_at' => null,
                 'otp_hash' => null, 'otp_expires_at' => null, 'session_digest' => hash('sha256', $token),
-                'session_expires_at' => now()->addMinutes(5),
+                'session_expires_at' => now()->addMinutes(5), 'verification_failures' => 0,
+                'verification_blocked_until' => null,
             ]);
-            $request->session()->regenerate();
-            $request->session()->put('organization_setup', ['user_id' => $setup->user_id, 'token' => $token, 'provider' => $provider]);
+
+            return ['user_id' => $setup->user_id, 'token' => $token, 'provider' => $provider];
         }, attempts: 3);
+        abort_if($session === null, 422);
+        $request->session()->regenerate();
+        $request->session()->put('organization_setup', $session);
 
         return response()->json(['stage' => 'set_password'])->header('Cache-Control', 'no-store');
     }
@@ -112,8 +128,8 @@ final class OrganizationCredentialController
         return $query;
     }
 
-    private function requireProof(string $secret, ?string $hash, ?string $expiry): void
+    private function validProof(string $secret, ?string $hash, ?string $expiry): bool
     {
-        abort_unless($hash !== null && $expiry !== null && now()->lt($expiry) && Hash::check($secret, $hash), 422);
+        return $hash !== null && $expiry !== null && now()->lt($expiry) && Hash::check($secret, $hash);
     }
 }

@@ -27,15 +27,7 @@ final class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        RateLimiter::for('organization-verify', static function (Request $request): array {
-            $code = $request->input('code');
-            $key = is_string($code) && preg_match('/^[A-Z]{2}[0-9]{4}$/D', $code) ? $code : 'invalid';
-
-            return [
-                Limit::perMinute(15)->by('ip:'.$request->ip()),
-                Limit::perHour(3)->by('code:'.$key)->after(static fn ($response): bool => $response->getStatusCode() === 422),
-            ];
-        });
+        RateLimiter::for('organization-verify', static fn (Request $request): Limit => Limit::perMinute(15)->by($request->ip()));
 
         Event::listen([Login::class, Failed::class, Logout::class], static function (Login|Failed|Logout $event): void {
             $action = match (true) {

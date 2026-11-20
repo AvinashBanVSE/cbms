@@ -36,13 +36,20 @@ final class AccountRecoveryController
 
     private function issue(Request $request, string $scope, bool $provider, callable $authorize): JsonResponse
     {
-        $input = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'reason' => 'required|string|max:500']);
+        $input = $request->validate([
+            'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
+            'reason' => 'required|string|max:500',
+            'replace_authenticator' => 'sometimes|boolean',
+            'identity_verified' => 'exclude_unless:replace_authenticator,true,1|required|accepted',
+        ]);
+        $replace = (bool) ($input['replace_authenticator'] ?? false);
         SetupDelivery::requireMailer();
         $accounts = $provider ? 'provider_accounts' : 'customer_accounts';
         $setups = $provider ? 'provider_user_setups' : 'organization_user_setups';
         $scopeColumn = $provider ? 'provider_id' : 'tenant_id';
-        [$email, $secret] = DB::transaction(function () use ($scope, $provider, $authorize, $input, $accounts, $setups, $scopeColumn): array {
+        [$email, $secret] = DB::transaction(function () use ($scope, $provider, $authorize, $input, $accounts, $setups, $scopeColumn, $replace): array {
             $main = $authorize();
+            abort_if($replace && ! $main, 403);
             $query = DB::table($accounts.' as account')->join('users', 'users.id', '=', 'account.user_id')
                 ->where('account.'.$scopeColumn, $scope)->where('account.state', 'Active')->where('users.code', $input['code']);
             if ($provider) {
@@ -59,6 +66,15 @@ final class AccountRecoveryController
             $previous = DB::table($setups)->where('user_id', $target->user_id)->lockForUpdate()->first();
             $recent = $previous?->last_issued_at !== null && now()->subHour()->lt($previous->last_issued_at);
             abort_if($recent && ($previous->issue_count >= 4 || now()->subMinute()->lt($previous->last_issued_at)), 429);
+            if ($replace) {
+                abort_if($target->user_id === Auth::id(), 403);
+                $factor = DB::table('user_authenticators')->where('user_id', $target->user_id)->lockForUpdate()->first();
+                abort_unless($factor?->secret !== null || ($factor?->reenrollment_required ?? false), 409, 'This account has no authenticator to replace.');
+                DB::table('user_authenticators')->where('user_id', $target->user_id)->update([
+                    'secret' => null, 'last_used_step' => null, 'reenrollment_required' => true,
+                    'version' => (int) $factor->version + 1,
+                ]);
+            }
             $secret = Str::random(32);
             DB::table($setups)->upsert([
                 'user_id' => $target->user_id, 'purpose' => 'recovery', 'mode' => 'temporary_password',
@@ -71,7 +87,8 @@ final class AccountRecoveryController
             DB::table($accounts)->where('user_id', $target->user_id)->increment('session_version');
             DB::table('portal_events')->insert([
                 'id' => Str::uuid7()->toString(), 'actor_id' => Auth::id(), 'subject_id' => $target->user_id,
-                'action' => 'account.password_recovery_started', 'recorded_at' => now(),
+                'action' => $replace ? 'authenticator.replacement_started' : 'account.password_recovery_started',
+                'recorded_at' => now(),
                 'details' => json_encode([$scopeColumn => $scope, 'reason' => $input['reason']], JSON_THROW_ON_ERROR),
             ]);
 

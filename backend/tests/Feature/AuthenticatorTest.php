@@ -8,13 +8,17 @@ use App\Accounts\Authenticator;
 use App\Http\Middleware\ValidateOrganizationSession;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 final class AuthenticatorTest extends TestCase
@@ -71,6 +75,82 @@ final class AuthenticatorTest extends TestCase
         $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'authenticator.disabled']);
         $this->postJson('/api/v1/logout')->assertNoContent();
         $this->postJson('/api/v1/login', $login)->assertNoContent();
+    }
+
+    public static function recoveryScopes(): array
+    {
+        return ['organization' => [false], 'provider' => [true]];
+    }
+
+    #[DataProvider('recoveryScopes')]
+    public function test_support_replacement_revokes_old_authenticator_and_requires_a_new_one(bool $provider): void
+    {
+        $this->freezeTime();
+        $main = Str::uuid7()->toString();
+        $business = Str::uuid7()->toString();
+        $scope = $provider ? $business : Str::uuid7()->toString();
+        $admin = Str::uuid7()->toString();
+        $member = Str::uuid7()->toString();
+        $password = 'test-only-existing-factor-password';
+        $email = 'replacement@example.test';
+        $code = 'AA8821';
+        $oldSecret = 'old-factor-test-seed';
+        DB::table('business_identities')->insert([
+            ['id' => $main, 'kind' => 'Main Portal', 'professional_name' => 'Portal', 'operational_state' => 'Active'],
+            ['id' => $business, 'kind' => $provider ? 'Sub-Portal' : 'Organization', 'professional_name' => 'Business', 'operational_state' => 'Active'],
+        ]);
+        DB::table('portal_installation')->where('id', 1)->update(['portal_id' => $main, 'stage' => 'ready']);
+        DB::table('users')->insert([
+            ['id' => $admin, 'code' => 'AA8820', 'email' => 'support@example.test', 'password' => Hash::make($password)],
+            ['id' => $member, 'code' => $code, 'email' => $email, 'password' => Hash::make($password)],
+        ]);
+        if (! $provider) {
+            DB::table('customer_tenants')->insert(['id' => $scope, 'provider_id' => $main, 'organization_id' => $business]);
+        }
+        DB::table($provider ? 'provider_accounts' : 'customer_accounts')->insert([
+            'user_id' => $member, ($provider ? 'provider_id' : 'tenant_id') => $scope, 'state' => 'Active',
+        ]);
+        DB::table('user_authenticators')->insert(['user_id' => $member, 'secret' => Crypt::encryptString($oldSecret), 'version' => 1]);
+        $transport = new ArrayTransport;
+        Mail::extend('recovery-test', static fn () => $transport);
+        config(['mail.default' => 'recovery-test', 'mail.mailers.recovery-test.transport' => 'recovery-test']);
+        $path = $provider ? "/api/v1/providers/{$scope}/users/recover" : "/api/v1/tenants/{$scope}/organization-users/recover";
+        $request = ['code' => $code, 'reason' => 'Verified reported authenticator loss', 'replace_authenticator' => true];
+        $this->actingAs(User::findOrFail($admin));
+        $this->postJson($path, [...$request, 'identity_verified' => true])->assertForbidden();
+        DB::table('portal_grants')->insert([
+            'user_id' => $admin, 'business_id' => $main, 'permission' => $provider ? 'provider_users.manage' : 'organization_users.manage',
+        ]);
+        $this->postJson($path, $request)->assertUnprocessable()->assertJsonValidationErrors('identity_verified');
+        $this->postJson(str_replace($scope, Str::uuid7()->toString(), $path), [...$request, 'identity_verified' => true])->assertNotFound();
+        $this->postJson($path, [...$request, 'identity_verified' => true])->assertExactJson(['delivery' => 'sent']);
+        $this->assertDatabaseHas('user_authenticators', ['user_id' => $member, 'secret' => null, 'reenrollment_required' => true, 'version' => 2]);
+        $this->assertDatabaseHas('portal_events', ['action' => 'authenticator.replacement_started', 'actor_id' => $admin, 'subject_id' => $member]);
+        $message = $transport->messages()->last()->getOriginalMessage();
+        $this->assertSame($email, $message->getTo()[0]->getAddress());
+        preg_match('/Temporary password: (\w+)/', $message->getTextBody(), $temporary);
+
+        $this->actingAs(User::findOrFail($member))->withSession([
+            Auth::guard('web')->getName() => $member, ValidateOrganizationSession::VERSION => 0, Authenticator::SESSION_VERSION => 1,
+        ]);
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
+        $login = ['code' => $code, 'email' => $email, 'password' => $password];
+        $this->postJson('/api/v1/login', [...$login, 'authenticator_code' => $this->code($oldSecret)])->assertUnauthorized();
+        $this->postJson('/api/v1/organization-setup/verify', ['code' => $code, 'temporary_password' => $temporary[1]])->assertOk();
+        $this->mock(UncompromisedVerifier::class)->shouldReceive('verify')->andReturn(true);
+        $replacement = 'test-only-replacement-factor-password';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $replacement, 'password_confirmation' => $replacement])->assertOk();
+        $login['password'] = $replacement;
+        $this->postJson('/api/v1/login', $login)->assertAccepted()->assertExactJson(['stage' => 'authenticator_enrollment_required']);
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
+        $this->postJson('/api/v1/authenticator/prepare', ['password' => $replacement])->assertOk();
+        $newSecret = Crypt::decryptString(session('pending_authenticator.secret'));
+        $this->postJson('/api/v1/authenticator/confirm', ['password' => $replacement, 'code' => $this->code($newSecret)])->assertOk();
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
+        $this->assertDatabaseHas('user_authenticators', ['user_id' => $member, 'reenrollment_required' => false, 'version' => 3]);
+        $this->assertDatabaseHas('portal_events', ['action' => 'authenticator.replaced', 'subject_id' => $member]);
+        $this->travel(30)->seconds();
+        $this->postJson('/api/v1/login', [...$login, 'authenticator_code' => $this->code($newSecret)])->assertNoContent();
     }
 
     private function code(string $secret): string

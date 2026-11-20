@@ -458,6 +458,8 @@ it("provisions, reissues and terminates Sub-Portal user accounts", async () => {
       expect(body).toEqual({
         code: "AA6190",
         reason: "Verified staff account",
+        replace_authenticator: true,
+        identity_verified: true,
       });
       return json({ delivery: "sent" });
     }
@@ -491,6 +493,13 @@ it("provisions, reissues and terminates Sub-Portal user accounts", async () => {
   document.querySelector<HTMLInputElement>(
     recovery + ' [name="reason"]',
   )!.value = "Verified staff account";
+  const replace = document.querySelector<HTMLInputElement>(
+    recovery + ' [name="replace_authenticator"]',
+  )!;
+  await act(async () => replace.click());
+  document.querySelector<HTMLInputElement>(
+    recovery + ' [name="identity_verified"]',
+  )!.checked = true;
   await submit(recovery);
   expect(document.body.textContent).toContain("Temporary password sent");
   fill("revoke", "provider", "provider");

@@ -55,9 +55,10 @@ final class AuthenticatorController
             abort_if($step === null, 422, 'Enter a current authenticator code.');
             $version = 1 + (int) ($existing?->version ?? 0);
             DB::table('user_authenticators')->upsert([
-                'user_id' => $user, 'secret' => $pending['secret'], 'last_used_step' => $step, 'version' => $version,
+                'user_id' => $user, 'secret' => $pending['secret'], 'last_used_step' => $step,
+                'version' => $version, 'reenrollment_required' => false,
             ], ['user_id']);
-            $this->record($user, 'authenticator.enabled');
+            $this->record($user, ($existing?->reenrollment_required ?? false) ? 'authenticator.replaced' : 'authenticator.enabled');
 
             return $version;
         }, attempts: 3);
@@ -113,8 +114,9 @@ final class AuthenticatorController
         $grant = $request->session()->get(OrganizationMfaPolicy::ENROLLMENT_SESSION);
         abort_unless(is_array($grant) && $grant['expires_at'] > now()->timestamp, 401);
         $account = ProviderAccess::sessionAccount($grant['user']);
-        abort_unless($account?->state === 'Active' && (int) $account->session_version === $grant['version']
-            && OrganizationMfaPolicy::requires($grant['user']), 401);
+        abort_unless($account?->state === 'Active' && (int) $account->session_version === $grant['version'], 401);
+        $factor = DB::table('user_authenticators')->where('user_id', $grant['user'])->first(['secret', 'reenrollment_required']);
+        abort_unless(Authenticator::requiresEnrollment($grant['user'], $factor), 401);
 
         return $grant['user'];
     }

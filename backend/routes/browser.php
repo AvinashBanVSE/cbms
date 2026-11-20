@@ -90,7 +90,7 @@ Route::prefix('api/v1')->group(function (): void {
                     $factor = DB::table('user_authenticators')->where('user_id', $user->getAuthIdentifier())->first();
                     $factorVersion = $factor === null ? null : (int) $factor->version;
                     if ($factor?->secret === null) {
-                        if ($account !== null && OrganizationMfaPolicy::requires((string) $user->getAuthIdentifier())) {
+                        if ($account !== null && Authenticator::requiresEnrollment((string) $user->getAuthIdentifier(), $factor)) {
                             $enrollment = ['user' => (string) $user->getAuthIdentifier(), 'version' => $version, 'expires_at' => now()->addMinutes(5)->timestamp];
 
                             return false;

@@ -135,12 +135,18 @@ final class BusinessStructureTest extends TestCase
         ]);
         Http::preventStrayRequests();
         $this->postJson($path, $input)->assertServiceUnavailable();
-        config(['portal.legal_verifier_url' => 'https://registry.example.test/verify', 'portal.legal_verifier_token' => 'fake-test-token']);
+        config(['portal.legal_verifier_url' => 'http://registry.example.test/verify', 'portal.legal_verifier_token' => 'fake-test-token']);
+        $this->postJson($path, $input)->assertServiceUnavailable();
+        config(['portal.legal_verifier_url' => 'https://registry.example.test/verify']);
         Http::fake(['registry.example.test/verify' => Http::sequence()
+            ->pushFailedConnection()
+            ->push([], 302, ['Location' => 'https://untrusted.example.test'])
             ->push(['verified' => false])
             ->push(['verified' => 'true'])
             ->push(['verified' => true, ...$input, 'evidence_reference' => 'different-record'])
             ->push(['verified' => true, ...$input])]);
+        $this->postJson($path, $input)->assertServiceUnavailable();
+        $this->postJson($path, $input)->assertServiceUnavailable();
         $this->postJson($path, $input)->assertUnprocessable();
         $this->postJson($path, $input)->assertServiceUnavailable();
         $this->postJson($path, $input)->assertUnprocessable();

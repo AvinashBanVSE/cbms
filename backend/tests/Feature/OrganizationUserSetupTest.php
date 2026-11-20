@@ -458,6 +458,7 @@ final class OrganizationUserSetupTest extends TestCase
         $this->getJson('/api/v1/workspace-access')->assertJsonPath('organization_recovery.tenant_id', $tenant);
         $this->postJson(str_replace($tenant, $otherTenant, $route), $request)->assertForbidden();
         $this->postJson($route, [...$request, 'code' => 'AA8811'])->assertForbidden();
+        $this->postJson($route, [...$request, 'replace_authenticator' => true, 'identity_verified' => true])->assertForbidden();
         $this->postJson($route, $request)->assertOk()->assertExactJson(['delivery' => 'sent']);
         $this->postJson($route, $request)->assertTooManyRequests();
         $this->assertDatabaseHas('customer_accounts', ['user_id' => $employee, 'state' => 'Active', 'session_version' => 1]);
@@ -553,6 +554,46 @@ final class OrganizationUserSetupTest extends TestCase
         DB::table('portal_grants')->where('user_id', $administrator->id)->delete();
         $this->getJson($path)->assertForbidden();
         $this->postJson($path, ['validity_minutes' => 5])->assertForbidden();
+    }
+
+    public function test_third_setup_failure_blocks_verification_for_a_full_hour_even_after_reissue(): void
+    {
+        [$tenant, $shop, $administrator] = $this->fixture();
+        $transport = new ArrayTransport;
+        Mail::extend('otp-block-test', static fn () => $transport);
+        config(['mail.default' => 'otp-block-test', 'mail.mailers.otp-block-test.transport' => 'otp-block-test']);
+        $this->freezeSecond();
+        $this->actingAs($administrator);
+        $base = "/api/v1/tenants/{$tenant}";
+        $this->postJson($base.'/credential-policy', ['mode' => 'otp'])->assertOk();
+        $code = $this->postJson($base.'/organization-users', [
+            'email' => 'rate-limit@example.test', 'business_id' => $shop, 'actions' => ['mapping.initiate'],
+        ])->assertCreated()->json('user_code');
+        preg_match('/One-time code: (\d{6})/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $issued);
+        $wrong = $issued[1] === '000000' ? '000001' : '000000';
+        $this->postJson('/api/v1/logout')->assertNoContent();
+        $path = '/api/v1/organization-setup/verify';
+        $this->postJson($path, ['code' => $code, 'otp' => $wrong])->assertUnprocessable();
+        $this->travel(1)->minute();
+        $this->postJson($path, ['code' => $code, 'otp' => $wrong])->assertUnprocessable();
+        $this->travel(1)->minute();
+        $this->postJson($path, ['code' => $code, 'otp' => $wrong])->assertUnprocessable();
+        $this->assertDatabaseHas('organization_user_setups', [
+            'user_id' => User::where('code', $code)->value('id'),
+            'verification_failures' => 3, 'verification_blocked_until' => now()->addHour()->toDateTimeString(),
+        ]);
+
+        $this->travel(59)->minutes();
+        $this->actingAs($administrator);
+        $this->postJson($base.'/organization-users/reissue', ['code' => $code])->assertOk();
+        preg_match('/One-time code: (\d{6})/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $reissued);
+        $this->postJson('/api/v1/logout')->assertNoContent();
+        $this->travel(59)->seconds();
+        $proof = ['code' => $code, 'otp' => $reissued[1]];
+        $this->postJson($path, $proof)->assertTooManyRequests();
+        $this->travel(1)->second();
+        $this->postJson($path, $proof)->assertOk();
+        $this->postJson($path, $proof)->assertUnprocessable();
     }
 
     private function fixtureForOtherOrganization(): array

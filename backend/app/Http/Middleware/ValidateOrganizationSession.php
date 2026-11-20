@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Accounts\Authenticator;
-use App\Accounts\OrganizationMfaPolicy;
 use App\Authorization\ProviderAccess;
 use Closure;
 use Illuminate\Auth\SessionGuard;
@@ -26,10 +25,10 @@ final class ValidateOrganizationSession
         $user = $session->get($guard->getName());
         if ($user !== null) {
             $account = ProviderAccess::sessionAccount((string) $user);
-            $authenticator = DB::table('user_authenticators')->where('user_id', $user)->first(['version', 'secret']);
+            $authenticator = DB::table('user_authenticators')->where('user_id', $user)->first(['version', 'secret', 'reenrollment_required']);
             if (($account !== null && ($account->state !== 'Active' || (int) $account->session_version !== $session->get(self::VERSION)))
                 || ($authenticator !== null && (int) $authenticator->version !== $session->get(Authenticator::SESSION_VERSION))
-                || ($authenticator?->secret === null && OrganizationMfaPolicy::requires((string) $user))) {
+                || Authenticator::requiresEnrollment((string) $user, $authenticator)) {
                 $guard->logout();
                 $session->invalidate();
                 $session->regenerateToken();

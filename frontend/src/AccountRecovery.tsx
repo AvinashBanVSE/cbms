@@ -10,6 +10,7 @@ export function AccountRecovery({
 }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replaceAuthenticator, setReplaceAuthenticator] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,6 +29,12 @@ export function AccountRecovery({
         await portalRequest(path, {
           code: String(fields.get("code")).trim(),
           reason: String(fields.get("reason")).trim(),
+          ...(!tenantId && fields.has("replace_authenticator")
+            ? {
+                replace_authenticator: true,
+                identity_verified: fields.has("identity_verified"),
+              }
+            : {}),
         })
       ).json();
       setNotice(
@@ -35,7 +42,10 @@ export function AccountRecovery({
           ? "Temporary password sent to the registered email."
           : "Email delivery failed. Issue a new temporary password when the retry window opens.",
       );
-      if (result.delivery === "sent") form.reset();
+      if (result.delivery === "sent") {
+        form.reset();
+        setReplaceAuthenticator(false);
+      }
     } catch (error) {
       setNotice((error as Error).message);
     } finally {
@@ -65,6 +75,26 @@ export function AccountRecovery({
           Issuing a temporary password ends existing sessions. The user sets a
           new password through Set up account.
         </p>
+        {!tenantId && (
+          <label>
+            <input
+              type="checkbox"
+              name="replace_authenticator"
+              checked={replaceAuthenticator}
+              onChange={(event) =>
+                setReplaceAuthenticator(event.target.checked)
+              }
+            />
+            Replace a lost or compromised authenticator
+          </label>
+        )}
+        {replaceAuthenticator && (
+          <label>
+            <input type="checkbox" name="identity_verified" required />I
+            verified the user’s identity. Their current authenticator will be
+            revoked and they must enroll a new one before signing in.
+          </label>
+        )}
         <button disabled={busy}>Send temporary password</button>
       </form>
       <p role="status">{notice}</p>

@@ -58,10 +58,16 @@ final class Authenticator
         return true;
     }
 
+    public static function requiresEnrollment(string $user, ?object $credential): bool
+    {
+        return $credential?->secret === null
+            && (($credential?->reenrollment_required ?? false) || OrganizationMfaPolicy::requires($user));
+    }
+
     public static function revokeForTermination(string $user): void
     {
-        DB::table('user_authenticators')->where('user_id', $user)->whereNotNull('secret')->update([
-            'secret' => null, 'last_used_step' => null, 'version' => DB::raw('version + 1'),
-        ]);
+        DB::table('user_authenticators')->where('user_id', $user)
+            ->where(fn ($query) => $query->whereNotNull('secret')->orWhere('reenrollment_required', true))
+            ->update(['secret' => null, 'last_used_step' => null, 'reenrollment_required' => false, 'version' => DB::raw('version + 1')]);
     }
 }
