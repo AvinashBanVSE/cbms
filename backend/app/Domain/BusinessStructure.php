@@ -8,6 +8,16 @@ use DomainException;
 
 final class BusinessStructure
 {
+    public static function networkConfiguration(int $distributors, int $shops): ?string
+    {
+        return match (true) {
+            $distributors > 0 && $shops > 0 => 'Hybrid Network',
+            $distributors > 0 => 'Distribution Network',
+            $shops > 0 => 'Retail Network',
+            default => null,
+        };
+    }
+
     /**
      * Check a proposed child against its authoritative parent record.
      *

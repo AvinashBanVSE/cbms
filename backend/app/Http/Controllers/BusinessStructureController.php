@@ -32,7 +32,23 @@ final class BusinessStructureController
         $owners = DB::table('ownership_links')->join('ownership_holders', 'ownership_holders.id', '=', 'ownership_links.owner_id')
             ->whereIn('business_id', $directory->getCollection()->pluck('id'))
             ->select('business_id', 'owner_id', 'ownership_holders.name')->get()->groupBy('business_id');
-        $directory->through(static function (object $business) use ($owners): object {
+        $organizations = $directory->getCollection()->where('kind', 'Organization')->pluck('id');
+        $children = DB::table('business_identities')
+            ->whereIn('parent_id', $organizations)->whereIn('kind', ['Distributor', 'Shop'])
+            ->select('parent_id', 'kind')->selectRaw('COUNT(*) as child_count')
+            ->groupBy('parent_id', 'kind')->get()->groupBy('parent_id');
+        $directory->through(static function (object $business) use ($owners, $children): object {
+            if ($business->kind === 'Organization') {
+                $counts = $children->get($business->id, collect())->pluck('child_count', 'kind');
+                $distributors = (int) $counts->get('Distributor', 0);
+                $shops = (int) $counts->get('Shop', 0);
+                $business->organization_network = [
+                    'configuration' => BusinessStructure::networkConfiguration($distributors, $shops),
+                    'distributor_count' => $distributors,
+                    'shop_count' => $shops,
+                ];
+            }
+
             $business->owners = $owners->get($business->id, []);
             $business->legal_name = $business->verified_legal_name ?? $business->legal_name;
             unset($business->verified_legal_name);

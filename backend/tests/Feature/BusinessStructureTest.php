@@ -47,6 +47,35 @@ final class BusinessStructureTest extends TestCase
             ->assertJsonFragment(['owner_id' => $owner]);
     }
 
+    public function test_directory_derives_networks_from_each_organizations_direct_children(): void
+    {
+        $main = $this->authenticate(true);
+        $distribution = $this->create(['kind' => 'Organization', 'provider_id' => $main, 'new_owner_name' => 'Distribution Owner']);
+        $retail = $this->create(['kind' => 'Organization', 'provider_id' => $main, 'new_owner_name' => 'Retail Owner']);
+        $this->create(['kind' => 'Distributor', 'parent_id' => $distribution]);
+        $distributor = $this->create(['kind' => 'Distributor', 'parent_id' => $distribution]);
+
+        $directory = fn () => collect($this->getJson('/api/v1/businesses')->assertOk()->json('data'))->keyBy('id');
+        $businesses = $directory();
+        $this->assertSame([
+            'configuration' => 'Distribution Network', 'distributor_count' => 2, 'shop_count' => 0,
+        ], $businesses[$distribution]['organization_network']);
+        $this->assertSame([
+            'configuration' => null, 'distributor_count' => 0, 'shop_count' => 0,
+        ], $businesses[$retail]['organization_network']);
+        $this->assertArrayNotHasKey('organization_network', $businesses[$distributor]);
+
+        $this->create(['kind' => 'Shop', 'parent_id' => $retail]);
+        $this->create(['kind' => 'Shop', 'parent_id' => $distribution]);
+        $businesses = $directory();
+        $this->assertSame([
+            'configuration' => 'Hybrid Network', 'distributor_count' => 2, 'shop_count' => 1,
+        ], $businesses[$distribution]['organization_network']);
+        $this->assertSame([
+            'configuration' => 'Retail Network', 'distributor_count' => 0, 'shop_count' => 1,
+        ], $businesses[$retail]['organization_network']);
+    }
+
     public function test_rejects_invalid_parent_provider_and_ownership(): void
     {
         $main = $this->authenticate(true);

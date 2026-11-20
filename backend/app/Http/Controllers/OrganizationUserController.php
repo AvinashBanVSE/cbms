@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Accounts\SetupDelivery;
+use App\Accounts\SetupOtpPolicy;
 use App\Accounts\UserCode;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\MappingPermissions;
@@ -179,13 +180,14 @@ final class OrganizationUserController
             $mode = $previous->mode;
             $temporary = $mode !== 'otp' ? Str::random(32) : null;
             $otp = $mode !== 'temporary_password' ? sprintf('%06d', random_int(0, 999999)) : null;
+            $issuedAt = now();
             $setup->update([
                 'issue_count' => $previous->issue_count + 1,
-                'last_issued_at' => now(),
+                'last_issued_at' => $issuedAt,
                 'temporary_hash' => $temporary ? Hash::make($temporary) : null,
                 'otp_hash' => $otp !== null ? Hash::make($otp) : null,
                 'temporary_expires_at' => $temporary ? now()->addMinutes(15) : null,
-                'otp_expires_at' => $otp !== null ? now()->addMinutes(5) : null,
+                'otp_expires_at' => $otp !== null ? $issuedAt->copy()->addMinutes(SetupOtpPolicy::minutes()) : null,
                 'session_digest' => null, 'session_expires_at' => null,
             ]);
             $this->record($account->id, 'organization_user.credentials_reissued');

@@ -704,7 +704,23 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
               id: "organization-1",
               professional_name: "Western Network",
               kind: "Organization",
+              organization_network: {
+                configuration: "Retail Network",
+                distributor_count: 0,
+                shop_count: 1,
+              },
               owners: [{ name: "Asha", owner_id: "owner-1" }],
+            },
+            {
+              id: "organization-2",
+              professional_name: "New Organization",
+              kind: "Organization",
+              organization_network: {
+                configuration: null,
+                distributor_count: 0,
+                shop_count: 0,
+              },
+              owners: [],
             },
           ],
           next_page_url: requestedPage === 1 ? "/next" : null,
@@ -728,6 +744,13 @@ it("creates an Organization, displays its ownership and creates a Shop", async (
   await click("Businesses");
   expect(document.body.textContent).toContain("Asha (owner-1)");
   expect(document.body.textContent).toContain("legal-1");
+  const organization = Array.from(document.querySelectorAll("article")).find(
+    (article) => article.querySelector("h3")?.textContent === "Western Network",
+  );
+  expect(organization?.textContent).toContain("Retail Network");
+  expect(organization?.textContent).toContain("Direct Distributors0");
+  expect(organization?.textContent).toContain("Direct Shops1");
+  expect(document.body.textContent).toContain("No Shops or Distributors");
   await click("Check ownership links");
   expect(document.body.textContent).toContain(
     "Organization ownership links are consistent",
@@ -918,6 +941,10 @@ it("configures account setup and provisions an authorized Organization user", as
         if (!body) return json({ password_history_count: 5 });
         expect(body).toEqual({ password_history_count: 8 });
         return json(body);
+      case "credential-settings/setup-otp":
+        if (!body) return json({ validity_minutes: 5 });
+        expect(body).toEqual({ validity_minutes: 3 });
+        return json(body);
       case "tenants/tenant/mfa-policy":
         expect(body).toEqual({ required: true, reason: "Security policy" });
         return json({ required: true });
@@ -949,6 +976,20 @@ it("configures account setup and provisions an authorized Organization user", as
   });
   await submit('form[data-operation="password-history-policy"]');
   expect(document.body.textContent).toContain("Password history policy saved");
+  await click("Load setup OTP policy");
+  const validity = document.querySelector<HTMLInputElement>(
+    '[name="validity_minutes"]',
+  )!;
+  expect(validity.value).toBe("5");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(validity, "3");
+    validity.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await submit('form[data-operation="setup-otp-policy"]');
+  expect(document.body.textContent).toContain("Setup OTP policy saved");
   const mfaForm = 'form[data-operation="organization-mfa-policy"]';
   document.querySelector<HTMLInputElement>(
     mfaForm + ' input[name="tenant"]',

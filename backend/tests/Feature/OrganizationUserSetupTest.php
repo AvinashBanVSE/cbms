@@ -42,14 +42,21 @@ final class OrganizationUserSetupTest extends TestCase
         $transport = new ArrayTransport;
         Mail::extend('memory-test', static fn () => $transport);
         config(['mail.default' => 'memory-test', 'mail.mailers.memory-test.transport' => 'memory-test']);
+        $this->freezeTime();
         $created = $this->postJson("{$url}/organization-users", $user)->assertCreated()->assertJsonPath('delivery', 'sent');
         $code = $created->json('user_code');
+        $userId = User::where('code', $code)->value('id');
+        $setup = DB::table('organization_user_setups')->where('user_id', $userId);
+        $this->assertSame($mode === 'temporary_password' ? null : now()->addMinutes(5)->toDateTimeString(), $setup->value('otp_expires_at'));
+        $this->postJson('/api/v1/credential-settings/setup-otp', ['validity_minutes' => 2])->assertOk();
+        $this->assertSame($mode === 'temporary_password' ? null : now()->addMinutes(5)->toDateTimeString(), $setup->value('otp_expires_at'));
         $this->postJson("{$url}/organization-users", $user)->assertUnprocessable();
         $this->postJson("{$url}/organization-users/reissue", ['code' => $code])->assertTooManyRequests();
         $this->travel(1)->minutes();
         $this->postJson("{$url}/credential-policy", ['mode' => 'inherit'])->assertOk();
         $this->assertDatabaseHas('organization_user_setups', ['mode' => $mode]);
         $this->postJson("{$url}/organization-users/reissue", ['code' => $code])->assertOk()->assertJsonPath('delivery', 'sent');
+        $this->assertSame($mode === 'temporary_password' ? null : now()->addMinutes(2)->toDateTimeString(), $setup->value('otp_expires_at'));
         $body = $transport->messages()->last()->getOriginalMessage()->getTextBody();
         $this->assertStringNotContainsString('https://', $body);
         $this->assertStringContainsString($code, $body);
@@ -525,6 +532,27 @@ final class OrganizationUserSetupTest extends TestCase
         $this->getJson($path)->assertOk()->assertExactJson(['password_history_count' => 8]);
         DB::table('portal_grants')->where('user_id', $administrator->id)->delete();
         $this->postJson($path, ['password_history_count' => 5])->assertForbidden();
+    }
+
+    public function test_setup_otp_policy_requires_main_portal_permission_and_audits_changes(): void
+    {
+        [, , $administrator] = $this->fixture();
+        $path = '/api/v1/credential-settings/setup-otp';
+        $this->getJson($path)->assertUnauthorized();
+        $this->actingAs($administrator);
+        $this->getJson($path)->assertOk()->assertExactJson(['validity_minutes' => 5]);
+        foreach ([0, 16, 1.5] as $invalid) {
+            $this->postJson($path, ['validity_minutes' => $invalid])->assertUnprocessable();
+        }
+        $this->postJson($path, ['validity_minutes' => 1])->assertOk()->assertExactJson(['validity_minutes' => 1]);
+        $this->postJson($path, ['validity_minutes' => 1])->assertOk();
+        $events = DB::table('portal_events')->where('action', 'credential_policy.setup_otp_validity_changed')->get();
+        $this->assertCount(1, $events);
+        $this->assertSame($administrator->id, $events->first()->actor_id);
+        $this->assertJsonStringEqualsJsonString('{"previous_minutes":5,"new_minutes":1}', $events->first()->details);
+        DB::table('portal_grants')->where('user_id', $administrator->id)->delete();
+        $this->getJson($path)->assertForbidden();
+        $this->postJson($path, ['validity_minutes' => 5])->assertForbidden();
     }
 
     private function fixtureForOtherOrganization(): array

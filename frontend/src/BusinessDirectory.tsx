@@ -13,6 +13,11 @@ interface Business {
   parent_id: string | null;
   provider_id: string | null;
   tenant_id: string | null;
+  organization_network?: {
+    configuration: string | null;
+    distributor_count: number;
+    shop_count: number;
+  };
   owners: { owner_id: string; name: string }[];
 }
 
@@ -190,6 +195,19 @@ export function BusinessDirectory() {
                   <>
                     <dt>Parent Organization ID</dt>
                     <dd>{business.parent_id}</dd>
+                  </>
+                )}
+                {business.organization_network && (
+                  <>
+                    <dt>Network configuration</dt>
+                    <dd>
+                      {business.organization_network.configuration ??
+                        "No Shops or Distributors"}
+                    </dd>
+                    <dt>Direct Distributors</dt>
+                    <dd>{business.organization_network.distributor_count}</dd>
+                    <dt>Direct Shops</dt>
+                    <dd>{business.organization_network.shop_count}</dd>
                   </>
                 )}
                 <dt>Owners</dt>

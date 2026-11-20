@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Accounts\Authenticator;
 use App\Accounts\SetupDelivery;
+use App\Accounts\SetupOtpPolicy;
 use App\Accounts\UserCode;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\ProviderAccess;
@@ -109,9 +110,10 @@ final class ProviderUserController
             abort_if($prior === null, 409);
             abort_if($prior->issue_count >= 4 || ($prior->last_issued_at !== null && now()->subMinute()->lt($prior->last_issued_at)), 429);
             $otp = sprintf('%06d', random_int(0, 999999));
+            $issuedAt = now();
             $setup->update([
-                'issue_count' => $prior->issue_count + 1, 'last_issued_at' => now(), 'otp_hash' => Hash::make($otp),
-                'otp_expires_at' => now()->addMinutes(5), 'session_digest' => null, 'session_expires_at' => null,
+                'issue_count' => $prior->issue_count + 1, 'last_issued_at' => $issuedAt, 'otp_hash' => Hash::make($otp),
+                'otp_expires_at' => $issuedAt->copy()->addMinutes(SetupOtpPolicy::minutes()), 'session_digest' => null, 'session_expires_at' => null,
             ]);
             $this->record('provider_user.setup_code_issued', $account->user_id, $provider);
 

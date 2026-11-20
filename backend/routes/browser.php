@@ -49,6 +49,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('tenants/{tenant}/mfa-policy', [OrganizationMfaController::class, 'update'])->whereUuid('tenant');
     Route::get('credential-settings', [CredentialSettingsController::class, 'show']);
     Route::post('credential-settings', [CredentialSettingsController::class, 'update']);
+    Route::get('credential-settings/setup-otp', [CredentialSettingsController::class, 'showOtp']);
+    Route::post('credential-settings/setup-otp', [CredentialSettingsController::class, 'updateOtp']);
     Route::get('provider-organizations', [ProviderUserController::class, 'organizations']);
     Route::post('providers/{provider}/users', [ProviderUserController::class, 'store'])->whereUuid('provider');
     Route::post('providers/{provider}/users/reissue', [ProviderUserController::class, 'reissue'])->whereUuid('provider')
