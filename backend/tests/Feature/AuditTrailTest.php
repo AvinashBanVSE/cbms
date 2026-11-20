@@ -33,7 +33,7 @@ final class AuditTrailTest extends TestCase
         DB::table('business_time_presentation')->insert([
             'business_id' => $portal, 'clock' => '24-hour', 'version' => 1,
         ]);
-        DB::table('business_calendar_presentation')->insert([
+        DB::table('business_presentation_preferences')->insert([
             'business_id' => $portal, 'setting' => 'date_format', 'value' => 'year-month-day', 'version' => 1,
         ]);
         $subject = Str::uuid7()->toString();

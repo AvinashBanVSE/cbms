@@ -11,6 +11,7 @@ final class BusinessTimePresentation
     public const OPTIONS = [
         'clock' => ['12-hour', '24-hour'],
         'date_format' => ['day-month-year', 'year-month-day'],
+        'negative_amount' => ['minus', 'parentheses'],
         'week_start' => ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
     ];
 
@@ -25,7 +26,7 @@ final class BusinessTimePresentation
         }
 
         $entry = ['value' => $values[$setting], ...array_diff_key($values, [$setting => true])];
-        DB::table('business_calendar_presentation')->upsert(
+        DB::table('business_presentation_preferences')->upsert(
             ['business_id' => $business, 'setting' => $setting, ...$entry],
             ['business_id', 'setting'], array_keys($entry),
         );
@@ -50,7 +51,7 @@ final class BusinessTimePresentation
         }
         $entries = $setting === 'clock'
             ? DB::table('business_time_presentation')->select('business_id', 'clock as value', 'override_allowed', 'locked', 'version')
-            : DB::table('business_calendar_presentation')->where('setting', $setting);
+            : DB::table('business_presentation_preferences')->where('setting', $setting);
         $settings = $entries->whereIn('business_id', array_keys($chain))->get()->keyBy('business_id');
 
         $effective = [$setting => null, 'source' => 'locale_default', 'locked_by' => null];

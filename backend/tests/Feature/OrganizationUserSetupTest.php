@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Accounts\SetupDelivery;
 use App\Http\Middleware\ValidateOrganizationSession;
 use App\Models\User;
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
@@ -65,6 +66,12 @@ final class OrganizationUserSetupTest extends TestCase
         preg_match('/Temporary password: (\w+)/', $body, $temporary);
         preg_match('/One-time code: (\d{6})/', $body, $otp);
         $proof = ['code' => $code, 'temporary_password' => $temporary[1] ?? null, 'otp' => $otp[1] ?? null];
+        [$otherTenant] = $this->fixtureForOtherOrganization();
+        $this->assertFalse(SetupDelivery::send($otherTenant, $code, $proof['temporary_password'], $proof['otp']));
+        $invalidTemporary = $proof['temporary_password'] === null ? null : 'unissued-temporary-password';
+        $invalidOtp = $proof['otp'] === null ? null : ($proof['otp'] === '000000' ? '000001' : '000000');
+        $this->assertFalse(SetupDelivery::send($tenant, $code, $invalidTemporary, $invalidOtp));
+        $this->assertCount(2, $transport->messages());
         $this->postJson('/api/v1/logout')->assertNoContent();
         $this->postJson('/api/v1/organization-setup/complete')->assertForbidden();
         $this->postJson('/api/v1/organization-setup/verify', ['code' => $code])->assertUnprocessable();

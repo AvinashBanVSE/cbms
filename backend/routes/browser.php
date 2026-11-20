@@ -66,14 +66,22 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('global-business-settings/time-presentation/{business}/access', [BusinessTimePresentationController::class, 'setOrganizationAccess'])->whereUuid('business');
     Route::get('organization-time-presentation', [BusinessTimePresentationController::class, 'showOrganization']);
     Route::post('organization-time-presentation', [BusinessTimePresentationController::class, 'updateOrganization']);
-    Route::get('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'showCalendar'])
+    Route::get('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'showPreference'])
         ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
-    Route::post('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'updateCalendar'])
+    Route::post('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'updatePreference'])
         ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
-    Route::post('global-business-settings/calendar-presentation/{setting}/{business}/access', [BusinessTimePresentationController::class, 'setCalendarAccess'])
+    Route::post('global-business-settings/calendar-presentation/{setting}/{business}/access', [BusinessTimePresentationController::class, 'setPreferenceAccess'])
         ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
     Route::get('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->whereIn('setting', ['date_format', 'week_start']);
     Route::post('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->whereIn('setting', ['date_format', 'week_start']);
+    Route::get('global-business-settings/number-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'showPreference'])
+        ->where('setting', 'negative_amount')->whereUuid('business');
+    Route::post('global-business-settings/number-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'updatePreference'])
+        ->where('setting', 'negative_amount')->whereUuid('business');
+    Route::post('global-business-settings/number-presentation/{setting}/{business}/access', [BusinessTimePresentationController::class, 'setPreferenceAccess'])
+        ->where('setting', 'negative_amount')->whereUuid('business');
+    Route::get('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->where('setting', 'negative_amount');
+    Route::post('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->where('setting', 'negative_amount');
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');

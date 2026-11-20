@@ -27,7 +27,12 @@ const inr = new Intl.NumberFormat("en-IN", {
   style: "currency",
   currency: "INR",
 });
-const money = (paise: number) => inr.format(paise / 100);
+function money(paise: number, negativeAmountStyle?: string | null): string {
+  if (paise < 0 && negativeAmountStyle === "parentheses") {
+    return "(" + inr.format(Math.abs(paise) / 100) + ")";
+  }
+  return inr.format(paise / 100);
+}
 
 export function CommercialBilling() {
   const [invoices, setInvoices] = useState<Page<Invoice>>();
@@ -35,6 +40,7 @@ export function CommercialBilling() {
   const [selected, setSelected] = useState<{
     invoice: Invoice;
     history: Page<LedgerEntry>;
+    presentation?: { negative_amount: string | null };
   }>();
   const [historyPage, setHistoryPage] = useState(1);
   const [notice, setNotice] = useState("");
@@ -189,7 +195,11 @@ export function CommercialBilling() {
             {selected.history.data.map((entry) => (
               <li key={entry.id}>
                 {entry.entry_type} · {entry.payment_id} ·{" "}
-                {entry.receipt_reference} · {money(entry.delta_paise)}
+                {entry.receipt_reference} ·{" "}
+                {money(
+                  entry.delta_paise,
+                  selected.presentation?.negative_amount,
+                )}
               </li>
             ))}
           </ul>

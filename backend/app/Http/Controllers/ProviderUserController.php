@@ -99,11 +99,11 @@ final class ProviderUserController
 
     private function issue(string $provider, string $code): bool
     {
-        [$email, $otp] = DB::transaction(function () use ($provider, $code): array {
+        $otp = DB::transaction(function () use ($provider, $code): string {
             $this->portal->requirePermission('provider_users.manage');
             $this->requireActiveProvider($provider);
             $account = $this->account($provider, $code)->where('account.state', 'Pending Verification')
-                ->lockForUpdate()->first(['account.user_id', 'users.email']);
+                ->lockForUpdate()->first(['account.user_id']);
             abort_if($account === null, 404);
             $setup = DB::table('provider_user_setups')->where('user_id', $account->user_id);
             $prior = $setup->lockForUpdate()->first();
@@ -117,10 +117,10 @@ final class ProviderUserController
             ]);
             $this->record('provider_user.setup_code_issued', $account->user_id, $provider);
 
-            return [$account->email, $otp];
+            return $otp;
         }, attempts: 3);
 
-        return SetupDelivery::send($email, $code, null, $otp);
+        return SetupDelivery::send($provider, $code, null, $otp, provider: true);
     }
 
     private function requireActiveProvider(string $provider): void

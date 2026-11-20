@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
 use App\Commercial\SubscriptionTerms;
+use App\Configuration\BusinessTimePresentation;
 use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -55,7 +56,7 @@ final class CommercialBillingController
         }, attempts: 3);
     }
 
-    public function payments(string $invoice): JsonResponse
+    public function payments(string $invoice, BusinessTimePresentation $presentation): JsonResponse
     {
         $this->access->requirePermission('commercial.manage');
         $row = $this->findInvoice($invoice, false);
@@ -70,8 +71,17 @@ final class CommercialBillingController
             return $entry;
         });
 
-        return response()->json(['invoice' => $this->balance($row, $this->paid($invoice)), 'history' => $history])
-            ->header('Cache-Control', 'no-store');
+        $portal = DB::table('portal_installation')->where('id', 1)->value('portal_id');
+        $organization = DB::table('commercial_subscriptions as subscription')
+            ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
+            ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
+            ->where('subscription.id', $row->subscription_id)->value('tenant.organization_id');
+        $style = $presentation->resolve($portal, $organization, 'negative_amount')['effective']['negative_amount'];
+
+        return response()->json([
+            'invoice' => $this->balance($row, $this->paid($invoice)), 'history' => $history,
+            'presentation' => ['negative_amount' => $style],
+        ])->header('Cache-Control', 'no-store');
     }
 
     public function payment(Request $request, string $invoice): JsonResponse

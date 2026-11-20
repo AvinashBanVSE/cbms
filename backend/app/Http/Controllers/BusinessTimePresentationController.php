@@ -125,17 +125,17 @@ final class BusinessTimePresentationController
         return response()->json(['enabled' => $enabled]);
     }
 
-    public function showCalendar(string $setting, ?string $business = null): JsonResponse
+    public function showPreference(string $setting, ?string $business = null): JsonResponse
     {
         return $this->show($business, $setting);
     }
 
-    public function updateCalendar(Request $request, string $setting, ?string $business = null): JsonResponse
+    public function updatePreference(Request $request, string $setting, ?string $business = null): JsonResponse
     {
         return $this->update($request, $business, $setting);
     }
 
-    public function setCalendarAccess(Request $request, string $setting, string $business): JsonResponse
+    public function setPreferenceAccess(Request $request, string $setting, string $business): JsonResponse
     {
         return $this->setOrganizationAccess($request, $business, $setting);
     }

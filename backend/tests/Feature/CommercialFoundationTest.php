@@ -40,7 +40,7 @@ final class CommercialFoundationTest extends TestCase
         $this->postJson("{$base}/subscriptions/{$tenant}/transition", [])->assertForbidden();
         $this->postJson("{$base}/subscriptions/{$tenant}/renew", [])->assertForbidden();
         $this->postJson($base.'/add_ons', [])->assertForbidden();
-        foreach (['commercial.manage', 'business_structure.create'] as $permission) {
+        foreach (['commercial.manage', 'business_structure.create', 'global_business_settings.manage'] as $permission) {
             DB::table('portal_grants')->insert(['business_id' => $portal, 'user_id' => $administrator, 'permission' => $permission]);
         }
 
@@ -322,7 +322,12 @@ final class CommercialFoundationTest extends TestCase
         $this->postJson("{$payments}/{$payment}/reverse", $reversal)->assertOk();
         $this->postJson("{$payments}/{$payment}/reverse", ['reason' => 'Different reason'])->assertConflict();
         $this->postJson($base.'/invoices', $terms)->assertOk()->assertJsonPath('id', $bill);
-        $this->getJson($payments)->assertOk()->assertJsonCount(3, 'history.data');
+        $this->postJson('/api/v1/global-business-settings/number-presentation/negative_amount/'.$organization, [
+            'negative_amount' => 'parentheses', 'override_allowed' => true, 'locked' => false, 'expected_version' => 0,
+        ])->assertOk();
+        $this->getJson($payments)->assertOk()->assertJsonCount(3, 'history.data')
+            ->assertJsonPath('presentation.negative_amount', 'parentheses')
+            ->assertJsonFragment(['entry_type' => 'reversal', 'delta_paise' => -2000]);
         $this->assertDatabaseHas('commercial_payments', ['id' => $payment, 'amount_paise' => 2000]);
         $this->assertDatabaseHas('commercial_billing_ledger', ['payment_id' => $payment, 'entry_type' => 'reversal', 'delta_paise' => -2000]);
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $subscription, 'state' => 'Pending Activation']);

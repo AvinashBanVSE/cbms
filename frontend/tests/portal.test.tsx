@@ -2162,15 +2162,16 @@ it("issues a billing record and records payments and reversals", async () => {
     if (url.startsWith("commercial/invoices/invoice1/payments?page="))
       return json({
         invoice: invoice(),
+        presentation: { negative_amount: "parentheses" },
         history: {
           data: results
             ? [
                 {
                   id: "entry",
                   payment_id: "payment1",
-                  entry_type: "payment",
+                  entry_type: results === 2 ? "reversal" : "payment",
                   receipt_reference: "R-01",
-                  delta_paise: 2000,
+                  delta_paise: results === 2 ? -2000 : 2000,
                 },
               ]
             : [],
@@ -2219,6 +2220,7 @@ it("issues a billing record and records payments and reversals", async () => {
   set(reverse, "reason", "Correction");
   await submit(reverse);
   expect(document.body.textContent).toContain("Payment reversal recorded");
+  expect(document.body.textContent).toContain("(₹20.00)");
   set(reverse, "payment", "missing");
   set(reverse, "reason", "Correction");
   await submit(reverse);

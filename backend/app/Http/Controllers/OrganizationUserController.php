@@ -163,11 +163,11 @@ final class OrganizationUserController
 
     private function issue(string $tenant, string $code): bool
     {
-        $credentials = DB::transaction(function () use ($tenant, $code): array {
+        [$temporary, $otp] = DB::transaction(function () use ($tenant, $code): array {
             $mainPortal = $this->onboarding->requireFor($tenant, lock: true);
             $account = DB::table('customer_accounts')->join('users', 'users.id', '=', 'customer_accounts.user_id')
                 ->where('tenant_id', $tenant)->where('state', 'Pending Verification')->where('code', $code)
-                ->select('users.id', 'users.email')->lockForUpdate()->first();
+                ->select('users.id')->lockForUpdate()->first();
             abort_if($account === null, 404);
             if (! $mainPortal) {
                 abort_if(DB::table('customer_permissions')->where('user_id', $account->id)
@@ -192,11 +192,10 @@ final class OrganizationUserController
             ]);
             $this->record($account->id, 'organization_user.credentials_reissued');
 
-            return [$account->email, $temporary, $otp];
+            return [$temporary, $otp];
         });
-        [$email, $temporary, $otp] = $credentials;
 
-        return SetupDelivery::send($email, $code, $temporary, $otp);
+        return SetupDelivery::send($tenant, $code, $temporary, $otp);
     }
 
     private function record(string $subject, string $action): void

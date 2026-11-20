@@ -2,7 +2,11 @@ import { useState, type FormEvent } from "react";
 import { portalRequest } from "./api";
 import { formatPresentedDate } from "./indiaTime";
 
-export type PresentationSetting = "clock" | "date_format" | "week_start";
+export type PresentationSetting =
+  | "clock"
+  | "date_format"
+  | "week_start"
+  | "negative_amount";
 
 const options: Record<
   PresentationSetting,
@@ -15,6 +19,10 @@ const options: Record<
   date_format: {
     label: "Date format",
     values: { "day-month-year": "DD/MM/YYYY", "year-month-day": "YYYY-MM-DD" },
+  },
+  negative_amount: {
+    label: "Negative amount display",
+    values: { minus: "Minus sign", parentheses: "Parentheses" },
   },
   week_start: {
     label: "First day of the week",
@@ -55,7 +63,7 @@ const sourceNames: Record<string, string> = {
 export function BusinessTimePresentation({
   timeZone = "Asia/Kolkata",
   organization = false,
-  settingsKeys = ["clock", "date_format", "week_start"],
+  settingsKeys = ["clock", "date_format", "week_start", "negative_amount"],
 }: {
   timeZone?: string;
   organization?: boolean;
@@ -67,14 +75,14 @@ export function BusinessTimePresentation({
   const [settings, setSettings] = useState<ClockSettings>();
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const endpoint =
+  const preferencePath =
     setting === "clock"
-      ? "global-business-settings/time-presentation"
-      : "global-business-settings/calendar-presentation/" + setting;
-  const organizationEndpoint =
-    setting === "clock"
-      ? "organization-time-presentation"
-      : "organization-calendar-presentation/" + setting;
+      ? "time-presentation"
+      : (setting === "negative_amount"
+          ? "number-presentation/"
+          : "calendar-presentation/") + setting;
+  const endpoint = "global-business-settings/" + preferencePath;
+  const organizationEndpoint = "organization-" + preferencePath;
 
   async function send(
     path: string,

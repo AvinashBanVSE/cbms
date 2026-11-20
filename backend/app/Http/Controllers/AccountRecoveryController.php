@@ -47,7 +47,7 @@ final class AccountRecoveryController
         $accounts = $provider ? 'provider_accounts' : 'customer_accounts';
         $setups = $provider ? 'provider_user_setups' : 'organization_user_setups';
         $scopeColumn = $provider ? 'provider_id' : 'tenant_id';
-        [$email, $secret] = DB::transaction(function () use ($scope, $provider, $authorize, $input, $accounts, $setups, $scopeColumn, $replace): array {
+        $secret = DB::transaction(function () use ($scope, $provider, $authorize, $input, $accounts, $setups, $scopeColumn, $replace): string {
             $main = $authorize();
             abort_if($replace && ! $main, 403);
             $query = DB::table($accounts.' as account')->join('users', 'users.id', '=', 'account.user_id')
@@ -56,7 +56,7 @@ final class AccountRecoveryController
                 $query->join('business_identities as provider', 'provider.id', '=', 'account.provider_id')
                     ->where('provider.kind', 'Sub-Portal')->where('provider.operational_state', 'Active');
             }
-            $target = $query->lockForUpdate()->first(['account.user_id', 'users.email', 'users.password']);
+            $target = $query->lockForUpdate()->first(['account.user_id', 'users.password']);
             abort_if($target === null, 404);
             if (! $main) {
                 abort_if($target->user_id === Auth::id() || DB::table('customer_permissions')->where('user_id', $target->user_id)
@@ -92,10 +92,10 @@ final class AccountRecoveryController
                 'details' => json_encode([$scopeColumn => $scope, 'reason' => $input['reason']], JSON_THROW_ON_ERROR),
             ]);
 
-            return [$target->email, $secret];
+            return $secret;
         }, attempts: 3);
 
-        return response()->json(['delivery' => SetupDelivery::send($email, $input['code'], $secret, null) ? 'sent' : 'failed'])
+        return response()->json(['delivery' => SetupDelivery::send($scope, $input['code'], $secret, null, provider: $provider) ? 'sent' : 'failed'])
             ->header('Cache-Control', 'no-store');
     }
 }

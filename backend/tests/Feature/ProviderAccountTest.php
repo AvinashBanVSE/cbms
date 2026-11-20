@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Accounts\SetupDelivery;
 use App\Authorization\ProviderAccess;
 use App\Http\Middleware\ValidateOrganizationSession;
 use App\Models\User;
@@ -60,7 +61,10 @@ final class ProviderAccountTest extends TestCase
         preg_match('/One-time code: (\d{6})/', $transport->messages()->last()->getOriginalMessage()->getTextBody(), $expiredOtp);
         $this->postJson($staff, $input)->assertUnprocessable();
         $this->postJson($staff.'/reissue', ['code' => $code])->assertTooManyRequests();
+        $this->assertFalse(SetupDelivery::send($other, $code, null, $expiredOtp[1], provider: true));
         $this->travel(1)->minute();
+        $this->assertFalse(SetupDelivery::send($provider, $code, null, $expiredOtp[1], provider: true));
+        $this->assertCount(1, $transport->messages());
         $this->postJson('/api/v1/logout')->assertNoContent();
         $this->postJson('/api/v1/organization-setup/verify', ['code' => $code, 'otp' => $expiredOtp[1]])->assertUnprocessable();
         $this->actingAs($operatorUser);
