@@ -1,0 +1,55 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.portal {
+  color-scheme: light dark;
+  color: CanvasText;
+  background: Canvas;
+  min-height: 100vh;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+header,
+section {
+  padding: 1.5rem clamp(1rem, 5vw, 4rem);
+}
+header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  border-bottom: 1px solid GrayText;
+}
+section.compact {
+  max-width: 54rem;
+  margin: auto;
+}
+form,
+details label {
+  max-width: 28rem;
+}
+label {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+input,
+select,
+button {
+  padding: 0.65rem;
+  font: inherit;
+  border-radius: 0.375rem;
+}
+button,
+summary {
+  cursor: pointer;
+}
+li {
+  padding: 0.5rem 0;
+}
