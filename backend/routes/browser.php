@@ -99,6 +99,7 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('plans/{plan}/versions', [CommercialController::class, 'publish'])->whereUuid('plan');
         Route::post('subscriptions', [CommercialController::class, 'subscription']);
         Route::post('subscriptions/{subscription}/transition', [CommercialController::class, 'transition'])->whereUuid('subscription');
+        Route::post('subscriptions/{subscription}/renew', [CommercialController::class, 'renew'])->whereUuid('subscription');
         Route::get('businesses/{business}/effective-entitlements', [CommercialController::class, 'effectiveEntitlements'])->whereUuid('business');
     });
     Route::post('provider-migrations/preview', [ServiceProviderMigrationController::class, 'preview']);

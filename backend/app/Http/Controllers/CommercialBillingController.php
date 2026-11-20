@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Commercial\SubscriptionTerms;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,16 +48,9 @@ final class CommercialBillingController
             }
             abort_if($data['due_on'] < $today, 422, 'The payment due date must be today or later.');
             abort_unless(in_array($subscription->state, ['Pending Activation', 'Trial', 'Active'], true), 409);
-            $charge = DB::table('commercial_plan_versions')->where('id', $subscription->plan_version_id)->value('amount_paise');
-            abort_if($charge === null, 409);
-            $row = [
-                'id' => Str::uuid7()->toString(), 'subscription_id' => $subscription->id,
-                'amount_paise' => (int) $charge, 'issued_on' => $today, 'due_on' => $data['due_on'],
-            ];
-            DB::table('commercial_invoices')->insert($row);
-            $this->audit('commercial.invoice_issued', $row['id'], ['subscription_id' => $subscription->id, 'amount_paise' => (int) $charge]);
+            $invoice = SubscriptionTerms::issueInvoice($subscription, $today, $data['due_on'], Auth::id());
 
-            return response()->json($this->balance((object) $row, 0), 201);
+            return response()->json($this->balance($invoice, 0), 201);
         }, attempts: 3);
     }
 

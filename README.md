@@ -10,6 +10,7 @@ The current development branch contains installation, the first Main Portal Owne
 3. Build the client in `frontend` with `npm install` and `npm run build`. Serve its `dist` folder and route `/api/` on the same HTTPS origin to Laravel's `public/index.php`.
 4. Open the portal. Enter the legal and trading names and the deployment secret. On the next screen enter the owner's name, email, permanent password and deployment secret. Save the assigned user code.
 5. Sign in using the user code, email and password. The first account has an explicit permission to view the Main Portal service category catalogue. Remove the setup digest from deployment configuration and refresh Laravel's configuration cache. The database stage also prevents reuse after owner creation.
+6. Run Laravel's scheduler in the deployment environment by invoking `php artisan schedule:run` from `backend` once a minute. Automatic Subscription renewal runs every five minutes. A renewal invoice is issued according to the lead time recorded on the term. Unsettled renewals follow their configured grace period and feature policy. Full activation requires the start date and invoice settlement. Reinstatement after suspension requires an authorized action.
 
 ## Verification
 

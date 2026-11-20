@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Commercial\SubscriptionCoverage;
+use App\Commercial\SubscriptionRenewal;
+use App\Commercial\SubscriptionTerms;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
@@ -16,7 +19,10 @@ use Illuminate\Validation\ValidationException;
 
 final class CommercialController
 {
-    public function __construct(private readonly MainPortalAccess $access) {}
+    public function __construct(
+        private readonly MainPortalAccess $access,
+        private readonly SubscriptionRenewal $renewals,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -27,7 +33,14 @@ final class CommercialController
             'subscriptions' => 'commercial_subscriptions', 'entitlements' => 'commercial_entitlement_definitions',
         ];
         $section = $data['section'];
-        $result = DB::table($tables[$section])->orderBy($section === 'entitlements' ? 'code' : 'id')->simplePaginate(30);
+        $query = DB::table($tables[$section])->orderBy($section === 'entitlements' ? 'code' : 'id');
+        if ($section === 'subscriptions') {
+            $query->select('commercial_subscriptions.*')->addSelect([
+                'renewal_id' => DB::table('commercial_subscriptions as renewal')->select('id')
+                    ->whereColumn('renewal.renewed_from_id', 'commercial_subscriptions.id'),
+            ]);
+        }
+        $result = $query->simplePaginate(30);
         $coverage = $section === 'subscriptions'
             ? DB::table('commercial_subscription_coverage')->whereIn('subscription_id', $result->getCollection()->pluck('id'))
                 ->orderBy('business_id')->get()->groupBy('subscription_id')
@@ -41,7 +54,11 @@ final class CommercialController
             }
             if ($section === 'subscriptions') {
                 $row->covered_business_ids = $coverage->get($row->id, collect())->pluck('business_id')->all();
-                $row->effective_state = $row->state !== 'Cancelled' && $row->ends_before <= $today ? 'Expired' : $row->state;
+                $row->effective_state = match (true) {
+                    $row->state !== 'Cancelled' && $row->ends_before <= $today => 'Expired',
+                    $row->state === 'Grace Period' && $row->grace_ends_before <= $today => 'Suspended',
+                    default => $row->state,
+                };
             }
 
             return $row;
@@ -124,7 +141,10 @@ final class CommercialController
         $this->access->requirePermission('commercial.manage');
         $data = $request->validate([
             'account_id' => 'required|uuid', 'plan_version_id' => 'required|uuid',
-            'starts_on' => 'required|date_format:Y-m-d', 'renewal_mode' => 'required|in:manual',
+            'starts_on' => 'required|date_format:Y-m-d', 'renewal_mode' => 'required|in:manual,automatic',
+            'renewal_lead_days' => 'required_if:renewal_mode,automatic|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
+            'renewal_grace_days' => 'required_with:renewal_grace_policy|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
+            'renewal_grace_policy' => 'required_with:renewal_grace_days|missing_unless:renewal_mode,automatic|in:retain_features,block_features',
             'coverage_mode' => 'required|in:organization,selected,network,future_network',
             'business_ids' => 'required_if:coverage_mode,selected|prohibited_unless:coverage_mode,selected|array|list|max:1000',
             'business_ids.*' => 'required|uuid|distinct:ignore_case',
@@ -135,10 +155,15 @@ final class CommercialController
             abort_if($account === null, 404);
             $tenant = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->first();
             abort_unless($tenant !== null && $tenant->provider_id === $account->provider_id, 409, 'This agreement requires a separate commercial transition.');
-            $version = DB::table('commercial_plan_versions as version')->join('commercial_plans as plan', 'plan.id', '=', 'version.plan_id')
-                ->where('version.id', $data['plan_version_id'])->where('plan.provider_id', $account->provider_id)
-                ->where('plan.family', 'tenant')->first(['version.term_days']);
-            abort_if($version === null, 422, 'Select a published Tenant Plan Version from the account provider.');
+            $termDays = SubscriptionTerms::duration($account->provider_id, $data['plan_version_id']);
+            $leadDays = $data['renewal_lead_days'] ?? null;
+            if ($leadDays > $termDays) {
+                throw ValidationException::withMessages(['renewal_lead_days' => 'The renewal lead time must fit within the term.']);
+            }
+            $graceDays = $data['renewal_grace_days'] ?? null;
+            if ($graceDays >= $termDays) {
+                throw ValidationException::withMessages(['renewal_grace_days' => 'The renewal grace period must be shorter than the term.']);
+            }
 
             $mode = $data['coverage_mode'];
             $organization = $tenant->organization_id;
@@ -160,13 +185,11 @@ final class CommercialController
             DB::table('commercial_subscriptions')->insert([
                 'id' => $id, 'account_id' => $account->id, 'plan_version_id' => $data['plan_version_id'],
                 'state' => 'Pending Activation', 'renewal_mode' => $data['renewal_mode'], 'coverage_mode' => $mode,
-                'starts_on' => $start->toDateString(), 'ends_before' => $start->addDays((int) $version->term_days)->toDateString(),
+                'renewal_lead_days' => $leadDays,
+                'renewal_grace_days' => $graceDays, 'renewal_grace_policy' => $data['renewal_grace_policy'] ?? null,
+                'starts_on' => $start->toDateString(), 'ends_before' => $start->addDays($termDays)->toDateString(),
             ]);
-            foreach (array_chunk($coverage, 250) as $group) {
-                DB::table('commercial_subscription_coverage')->insert(array_map(
-                    static fn (string $business): array => ['subscription_id' => $id, 'business_id' => $business], $group,
-                ));
-            }
+            SubscriptionCoverage::assign($id, $coverage);
             $this->audit('commercial.subscription_created', $id, ['account_id' => $account->id, 'coverage_mode' => $mode]);
 
             return response()->json(['id' => $id, 'state' => 'Pending Activation'], 201);
@@ -178,7 +201,7 @@ final class CommercialController
         $this->access->requirePermission('commercial.manage');
         $data = $request->validate([
             'action' => 'required|in:activate,suspend,cancel',
-            'expected_state' => 'required|in:Pending Activation,Active,Suspended',
+            'expected_state' => 'required|in:Pending Activation,Active,Grace Period,Suspended',
             'reason' => 'required|string|max:500',
         ]);
 
@@ -194,20 +217,23 @@ final class CommercialController
             abort_if($record->ends_before <= $today, 409, 'The Subscription term has ended.');
 
             [$allowed, $next] = match ($data['action']) {
-                'activate' => [['Pending Activation', 'Suspended'], 'Active'],
-                'suspend' => [['Active'], 'Suspended'],
-                'cancel' => [['Pending Activation', 'Active', 'Suspended'], 'Cancelled'],
+                'activate' => [['Pending Activation', 'Grace Period', 'Suspended'], 'Active'],
+                'suspend' => [['Active', 'Grace Period'], 'Suspended'],
+                'cancel' => [['Pending Activation', 'Active', 'Grace Period', 'Suspended'], 'Cancelled'],
             };
             abort_unless(in_array($record->state, $allowed, true), 409, 'This action is unavailable in the current Subscription state.');
 
             if ($next === 'Active') {
                 abort_unless($provider === $account->provider_id, 409, 'This agreement requires a separate commercial transition.');
                 abort_if($today < $record->starts_on, 409, 'The Subscription term has yet to start.');
-                $invoice = DB::table('commercial_invoices')->where('subscription_id', $subscription)->lockForUpdate()->first();
+                $invoice = SubscriptionTerms::invoiceForSettlement($subscription);
                 abort_if($invoice === null, 409, 'Issue the term invoice before activation.');
-                $paid = (int) DB::table('commercial_billing_ledger')->where('invoice_id', $invoice->id)
-                    ->lockForUpdate()->pluck('delta_paise')->sum();
-                abort_unless($paid === (int) $invoice->amount_paise, 409, 'Settle the term invoice before activation.');
+                abort_unless(SubscriptionTerms::isSettled($invoice), 409, 'Settle the term invoice before activation.');
+            }
+            if ($next === 'Cancelled') {
+                abort_if(DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)
+                    ->where('state', 'Pending Activation')->lockForUpdate()->first() !== null, 409,
+                    'Cancel the upcoming renewal before cancelling this term.');
             }
 
             DB::table('commercial_subscriptions')->where('id', $subscription)->update(['state' => $next]);
@@ -217,6 +243,16 @@ final class CommercialController
 
             return response()->json(['id' => $subscription, 'state' => $next]);
         }, attempts: 3);
+    }
+
+    public function renew(Request $request, string $subscription): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $data = $request->validate(['plan_version_id' => 'required|uuid', 'reason' => 'required|string|max:500']);
+
+        [$id, $startsOn, $created] = $this->renewals->manual($subscription, $data['plan_version_id'], $data['reason']);
+
+        return response()->json(['id' => $id, 'starts_on' => $startsOn], $created ? 201 : 200);
     }
 
     public function effectiveEntitlements(string $business): JsonResponse
@@ -232,7 +268,12 @@ final class CommercialController
             ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
             ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
             ->where('tenant.organization_id', $organization)->where('coverage.business_id', $business)
-            ->whereIn('subscription.state', ['Active', 'Trial'])->where('subscription.starts_on', '<=', $today)
+            ->where(function ($query) use ($today): void {
+                $query->whereIn('subscription.state', ['Active', 'Trial'])->orWhere(function ($grace) use ($today): void {
+                    $grace->where('subscription.state', 'Grace Period')
+                        ->where('subscription.renewal_grace_policy', 'retain_features')->where('subscription.grace_ends_before', '>', $today);
+                });
+            })->where('subscription.starts_on', '<=', $today)
             ->where('subscription.ends_before', '>', $today)->select('subscription.plan_version_id');
         $plans = DB::table('commercial_plan_versions')->whereIn('id', $eligibleVersions)->cursor();
 

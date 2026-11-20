@@ -8,6 +8,15 @@ use Illuminate\Support\Facades\DB;
 
 final class SubscriptionCoverage
 {
+    public static function assign(string $subscription, array $coverage): void
+    {
+        foreach (array_chunk($coverage, 250) as $group) {
+            DB::table('commercial_subscription_coverage')->insert(array_map(
+                static fn (string $business): array => ['subscription_id' => $subscription, 'business_id' => $business], $group,
+            ));
+        }
+    }
+
     public static function includeNewChild(string $organization, string $child): void
     {
         $today = now('Asia/Kolkata')->toDateString();

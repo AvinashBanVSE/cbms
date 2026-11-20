@@ -895,6 +895,7 @@ it("previews a provider migration and submits only a valid reviewed scope", asyn
 });
 
 it("publishes a Plan Version and registers a subscription with explicit coverage", async () => {
+  let automatic = false;
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
     if (path === "services/categories") return json({ A1: "Identity" });
@@ -917,7 +918,14 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
         account_id: "account",
         plan_version_id: "version1",
         starts_on: "2032-02-28",
-        renewal_mode: "manual",
+        renewal_mode: automatic ? "automatic" : "manual",
+        ...(automatic
+          ? {
+              renewal_lead_days: "5",
+              renewal_grace_days: "3",
+              renewal_grace_policy: "retain_features",
+            }
+          : {}),
         coverage_mode: "selected",
         business_ids: ["shop", "distributor"],
       });
@@ -966,6 +974,32 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
   expect(document.body.textContent).toContain(
     "Pending Activation · Saved: subscription1",
   );
+  automatic = true;
+  await act(async () => {
+    const mode = document.querySelector<HTMLSelectElement>(
+      form + ' select[name="renewal_mode"]',
+    )!;
+    mode.value = "automatic";
+    mode.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  set("account_id", "account");
+  set("plan_version_id", "version1");
+  set("starts_on", "2032-02-28");
+  set("coverage_mode", "selected");
+  set("business_ids", "shop, distributor");
+  set("renewal_lead_days", "5");
+  await act(async () => {
+    const policy = document.querySelector<HTMLSelectElement>(
+      '[data-control="renewal-grace-policy"]',
+    )!;
+    policy.value = "retain_features";
+    policy.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  set("renewal_grace_days", "3");
+  await submit(form);
+  expect(
+    document.querySelector(form + ' input[name="renewal_lead_days"]'),
+  ).toBeNull();
   await change("plans");
   set("provider_id", "unknown");
   set("name", "Plan");
@@ -980,6 +1014,7 @@ it("publishes a Plan Version and registers a subscription with explicit coverage
 it("changes a subscription state and resolves features for a covered business", async () => {
   let state = "Pending Activation";
   let settled = false;
+  let renewed = false;
   request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
     if (path === "services/categories") return json({ A1: "Identity" });
@@ -987,8 +1022,20 @@ it("changes a subscription state and resolves features for a covered business", 
     if (path === "commercial?section=subscriptions&page=1")
       return json({
         data: [
-          { id: "contract", state, effective_state: state },
-          { id: "ended", state: "Active", effective_state: "Expired" },
+          {
+            id: "contract",
+            state,
+            effective_state: state,
+            ends_before: "2032-03-29",
+            plan_version_id: "v1",
+            renewal_id: renewed ? "next-term" : null,
+          },
+          {
+            id: "ended",
+            state: "Active",
+            effective_state: "Expired",
+            renewal_id: "successor",
+          },
         ],
         next_page_url: null,
       });
@@ -998,6 +1045,14 @@ it("changes a subscription state and resolves features for a covered business", 
         throw new Error("Settle the term invoice before activation.");
       state = body?.action === "activate" ? "Active" : "Suspended";
       return json({ id: "contract", state });
+    }
+    if (path === "commercial/subscriptions/contract/renew") {
+      expect(body).toEqual({
+        plan_version_id: "v2",
+        reason: "Next term approved",
+      });
+      renewed = true;
+      return json({ id: "next-term", starts_on: "2032-03-29" });
     }
     if (path === "commercial/businesses/shop/effective-entitlements")
       return json({
@@ -1039,6 +1094,23 @@ it("changes a subscription state and resolves features for a covered business", 
     },
   );
   expect(document.body.textContent).toContain("Subscription state updated.");
+  const renewal = "form[data-operation=subscription-renew]";
+  expect(
+    document.querySelector<HTMLInputElement>(
+      renewal + ' input[name="plan_version_id"]',
+    )?.value,
+  ).toBe("v1");
+  document.querySelector<HTMLInputElement>(
+    renewal + ' input[name="plan_version_id"]',
+  )!.value = "v2";
+  document.querySelector<HTMLInputElement>(
+    renewal + ' input[name="reason"]',
+  )!.value = "Next term approved";
+  await submit(renewal);
+  expect(document.body.textContent).toContain(
+    "Renewal saved: next-term · Starts 2032-03-29",
+  );
+  expect(document.querySelector(renewal)).toBeNull();
   input("business_id", "shop");
   await submit(lookup);
   expect(

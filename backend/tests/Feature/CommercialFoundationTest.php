@@ -55,7 +55,8 @@ final class CommercialFoundationTest extends TestCase
         $terms = ['amount_paise' => 12345, 'term_days' => 30, 'entitlements' => ['portal.reports']];
         $this->postJson($publish, [...$terms, 'entitlements' => ['unknown.feature']])->assertUnprocessable();
         $version = $this->postJson($publish, $terms)->assertCreated()->assertJsonPath('version', 1)->json('id');
-        $this->postJson($publish, [...$terms, 'amount_paise' => 20000])->assertCreated()->assertJsonPath('version', 2);
+        $nextVersion = $this->postJson($publish, [...$terms, 'amount_paise' => 20000, 'entitlements' => []])
+            ->assertCreated()->assertJsonPath('version', 2)->json('id');
         $this->assertDatabaseHas('commercial_plan_versions', ['id' => $version, 'amount_paise' => 12345]);
         $this->getJson($base.'?section=versions')->assertOk()->assertJsonFragment(['composition' => 'any']);
 
@@ -81,7 +82,8 @@ final class CommercialFoundationTest extends TestCase
         $this->travelBack();
 
         $this->assertBilling($base, $selected, $organization);
-        $this->assertSubscriptionLifecycle($base, $selected, $child, $organization, $otherChild);
+        $this->assertSubscriptionLifecycle($base, $selected, $child, $organization, $otherChild, $nextVersion);
+        $this->assertAutomaticRenewal($base, [...$input, 'coverage_mode' => 'future_network'], $organization, $child);
         DB::table('customer_tenants')->where('id', $tenant)->update(['provider_id' => $portal]);
         $this->postJson($base.'/subscriptions', [...$input, 'coverage_mode' => 'organization'])->assertConflict();
         $this->travelTo(CarbonImmutable::parse('2032-03-02', 'Asia/Kolkata'));
@@ -92,7 +94,65 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseHas('commercial_subscriptions', ['id' => $selected, 'plan_version_id' => $version]);
     }
 
-    private function assertSubscriptionLifecycle(string $base, string $subscription, string $child, string $organization, string $otherChild): void
+    private function assertAutomaticRenewal(string $base, array $input, string $organization, string $child): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2032-03-20', 'Asia/Kolkata'));
+        $terms = [...$input, 'renewal_mode' => 'automatic'];
+        $this->postJson($base.'/subscriptions', $terms)->assertUnprocessable();
+        $this->postJson($base.'/subscriptions', [...$terms, 'renewal_lead_days' => 31])->assertUnprocessable();
+        $this->postJson($base.'/subscriptions', [...$terms, 'renewal_lead_days' => 5, 'renewal_grace_days' => 3])->assertUnprocessable();
+        $subscription = $this->postJson($base.'/subscriptions', [
+            ...$terms, 'renewal_lead_days' => 5, 'renewal_grace_days' => 3, 'renewal_grace_policy' => 'retain_features',
+        ])->assertCreated()->json('id');
+        $invoice = $this->postJson($base.'/invoices', ['subscription_id' => $subscription, 'due_on' => '2032-03-20'])
+            ->assertCreated()->json('id');
+        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12345, 'receipt_reference' => 'AUTO-FIRST'])->assertCreated();
+        $this->postJson("{$base}/subscriptions/{$subscription}/transition", [
+            'action' => 'activate', 'expected_state' => 'Pending Activation', 'reason' => 'First term paid',
+        ])->assertOk();
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseMissing('commercial_subscriptions', ['renewed_from_id' => $subscription]);
+
+        $this->travelTo(CarbonImmutable::parse('2032-03-24', 'Asia/Kolkata'));
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $next = DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)->first();
+        $this->assertSame('2032-03-29', $next->starts_on);
+        $this->assertSame('automatic', $next->renewal_mode);
+        $this->assertDatabaseHas('commercial_subscription_coverage', ['subscription_id' => $next->id, 'business_id' => $child]);
+        $this->assertDatabaseHas('commercial_subscription_coverage', ['subscription_id' => $next->id, 'business_id' => $organization]);
+        $this->assertDatabaseHas('commercial_invoices', ['subscription_id' => $next->id, 'issued_on' => '2032-03-24', 'due_on' => '2032-03-29']);
+        $this->postJson("{$base}/subscriptions/{$subscription}/transition", [
+            'action' => 'cancel', 'expected_state' => 'Active', 'reason' => 'Agreement ended by request',
+        ])->assertConflict()->assertJsonPath('message', 'Cancel the upcoming renewal before cancelling this term.');
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertSame(1, DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)->count());
+
+        $this->travelTo(CarbonImmutable::parse('2032-03-29', 'Asia/Kolkata'));
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseHas('commercial_subscriptions', [
+            'id' => $next->id, 'state' => 'Grace Period', 'grace_ends_before' => '2032-04-01',
+        ]);
+        $available = "{$base}/businesses/{$child}/effective-entitlements";
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+        $this->travelTo(CarbonImmutable::parse('2032-04-01', 'Asia/Kolkata'));
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
+        $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['effective_state' => 'Suspended']);
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Suspended']);
+        $this->assertDatabaseHas('business_identities', ['id' => $child, 'operational_state' => 'Active']);
+        $invoice = DB::table('commercial_invoices')->where('subscription_id', $next->id)->value('id');
+        $this->postJson("{$base}/invoices/{$invoice}/payments", ['amount_paise' => 12345, 'receipt_reference' => 'AUTO-NEXT'])->assertCreated();
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Suspended']);
+        $this->postJson("{$base}/subscriptions/{$next->id}/transition", [
+            'action' => 'activate', 'expected_state' => 'Suspended', 'reason' => 'Overdue invoice settled',
+        ])->assertOk();
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Active']);
+        $this->assertDatabaseHas('portal_events', ['action' => 'commercial.subscription_state_changed', 'actor_id' => null, 'subject_id' => $next->id]);
+        $this->travelBack();
+    }
+
+    private function assertSubscriptionLifecycle(string $base, string $subscription, string $child, string $organization, string $otherChild, string $nextVersion): void
     {
         $transition = "{$base}/subscriptions/{$subscription}/transition";
         $available = "{$base}/businesses/{$child}/effective-entitlements";
@@ -131,8 +191,31 @@ final class CommercialFoundationTest extends TestCase
         $this->assertDatabaseHas('portal_events', ['subject_id' => $subscription, 'action' => 'commercial.subscription_state_changed',
             'details' => '{"from":"Active","to":"Suspended","reason":"Commercial review"}']);
 
+        $renew = "{$base}/subscriptions/{$subscription}/renew";
+        $renewal = ['plan_version_id' => $nextVersion, 'reason' => 'Next cycle Plan Version approved'];
+        $this->postJson($renew, [...$renewal, 'plan_version_id' => Str::uuid7()->toString()])->assertUnprocessable();
+        $nextTerm = $this->postJson($renew, $renewal)->assertCreated()->assertJsonPath('starts_on', '2032-03-29')->json('id');
+        $this->postJson($renew, $renewal)->assertOk()->assertJsonPath('id', $nextTerm);
+        $this->postJson($renew, [...$renewal, 'plan_version_id' => Str::uuid7()->toString()])->assertConflict();
+        $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['renewal_id' => $nextTerm]);
+        $this->assertDatabaseHas('commercial_subscriptions', [
+            'id' => $nextTerm, 'renewed_from_id' => $subscription, 'plan_version_id' => $nextVersion,
+            'state' => 'Pending Activation', 'ends_before' => '2032-04-28',
+        ]);
+        $this->assertDatabaseHas('commercial_subscription_coverage', ['subscription_id' => $nextTerm, 'business_id' => $child]);
+        $this->assertDatabaseMissing('commercial_subscription_coverage', ['subscription_id' => $nextTerm, 'business_id' => $otherChild]);
+        $nextTransition = "{$base}/subscriptions/{$nextTerm}/transition";
+        $nextInvoice = $this->postJson($base.'/invoices', ['subscription_id' => $nextTerm, 'due_on' => '2032-03-29'])
+            ->assertCreated()->assertJsonPath('amount_paise', 20000)->json('id');
+        $this->postJson("{$base}/invoices/{$nextInvoice}/payments", ['amount_paise' => 20000, 'receipt_reference' => 'NEXT-TERM'])
+            ->assertCreated();
+        $this->postJson($nextTransition, $activate)->assertConflict()->assertJsonPath('message', 'The Subscription term has yet to start.');
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', ['portal.reports']);
+
         $cancel = ['action' => 'cancel', 'expected_state' => 'Active', 'reason' => 'Agreement ended by request'];
         $this->travelTo(CarbonImmutable::parse('2032-03-29', 'Asia/Kolkata'));
+        $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
+        $this->postJson($nextTransition, $activate)->assertOk()->assertJsonPath('state', 'Active');
         $this->getJson($available)->assertOk()->assertJsonPath('feature_codes', []);
         $this->getJson($base.'?section=subscriptions')->assertOk()->assertJsonFragment(['effective_state' => 'Expired']);
         $this->postJson($transition, $cancel)->assertConflict()->assertJsonPath('message', 'The Subscription term has ended.');

@@ -108,6 +108,11 @@ const subscriptionActions: Record<string, [string, string][]> = {
     ["suspend", "Suspend"],
     ["cancel", "Cancel immediately"],
   ],
+  "Grace Period": [
+    ["activate", "Activate"],
+    ["suspend", "Suspend"],
+    ["cancel", "Cancel immediately"],
+  ],
   Suspended: [
     ["activate", "Reinstate"],
     ["cancel", "Cancel immediately"],
@@ -121,6 +126,8 @@ export function CommercialWorkspace() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [features, setFeatures] = useState<AvailableFeatures>();
+  const [renewalMode, setRenewalMode] = useState("manual");
+  const [gracePolicy, setGracePolicy] = useState("");
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -164,7 +171,7 @@ export function CommercialWorkspace() {
       body.entitlements = split(body.entitlements);
     }
     if (section === "subscriptions") {
-      body.renewal_mode = "manual";
+      body.renewal_mode = renewalMode;
       body.business_ids = split(body.business_ids);
       if (body.coverage_mode !== "selected" && body.business_ids.length === 0)
         delete body.business_ids;
@@ -182,6 +189,8 @@ export function CommercialWorkspace() {
           (result.id ?? result.code),
       );
       form.reset();
+      setRenewalMode("manual");
+      setGracePolicy("");
     });
   }
 
@@ -228,6 +237,28 @@ export function CommercialWorkspace() {
     });
   }
 
+  function renew(event: FormEvent<HTMLFormElement>, id: string) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    return run(async () => {
+      const result = await (
+        await portalRequest(
+          "commercial/subscriptions/" + encodeURIComponent(id) + "/renew",
+          {
+            plan_version_id: String(fields.get("plan_version_id")).trim(),
+            reason: String(fields.get("reason")).trim(),
+          },
+        )
+      ).json();
+      form.reset();
+      await load(page);
+      setNotice(
+        "Renewal saved: " + result.id + " · Starts " + result.starts_on,
+      );
+    });
+  }
+
   return (
     <>
       <label>
@@ -241,6 +272,8 @@ export function CommercialWorkspace() {
             setPage(1);
             setNotice("");
             setFeatures(undefined);
+            setRenewalMode("manual");
+            setGracePolicy("");
           }}
         >
           {Object.entries(sections).map(([key, value]) => (
@@ -272,10 +305,71 @@ export function CommercialWorkspace() {
           </label>
         ))}
         {section === "subscriptions" && (
-          <p>
-            Renewal is manual. The subscription is created in Pending
-            Activation.
-          </p>
+          <>
+            <label>
+              Renewal method
+              <select
+                name="renewal_mode"
+                value={renewalMode}
+                onChange={(event) => {
+                  setRenewalMode(event.target.value);
+                  setGracePolicy("");
+                }}
+              >
+                <option value="manual">Manual</option>
+                <option value="automatic">Automatic</option>
+              </select>
+            </label>
+            {renewalMode === "automatic" && (
+              <>
+                <label>
+                  Days before the next term to issue its invoice
+                  <input
+                    name="renewal_lead_days"
+                    type="number"
+                    min="1"
+                    max="3660"
+                    required
+                  />
+                </label>
+                <label>
+                  Renewal grace policy
+                  <select
+                    data-control="renewal-grace-policy"
+                    value={gracePolicy}
+                    onChange={(event) => setGracePolicy(event.target.value)}
+                  >
+                    <option value="">No grace period</option>
+                    <option value="retain_features">
+                      Keep features available
+                    </option>
+                    <option value="block_features">Block features</option>
+                  </select>
+                </label>
+                {gracePolicy && (
+                  <label>
+                    Grace period in days
+                    <input
+                      name="renewal_grace_days"
+                      type="number"
+                      min="1"
+                      max="3660"
+                      required
+                    />
+                    <input
+                      name="renewal_grace_policy"
+                      type="hidden"
+                      value={gracePolicy}
+                    />
+                  </label>
+                )}
+              </>
+            )}
+            <p>
+              The first term requires activation. Automatic renewals start once
+              the next term begins and its invoice is settled.
+            </p>
+          </>
         )}
         <button disabled={busy}>
           {section === "versions" ? "Publish Plan Version" : "Create record"}
@@ -333,6 +427,35 @@ export function CommercialWorkspace() {
                       <button disabled={busy}>Apply subscription action</button>
                     </form>
                   )}
+                  {section === "subscriptions" &&
+                    state === "Active" &&
+                    !item.renewal_id && (
+                      <details>
+                        <summary>Renew for the next term</summary>
+                        <p>
+                          Starts {String(item.ends_before)}. This creates a
+                          manual renewal with its own invoice.
+                        </p>
+                        <form
+                          data-operation="subscription-renew"
+                          onSubmit={(event) => renew(event, String(item.id))}
+                        >
+                          <label>
+                            Next term Plan Version ID
+                            <input
+                              name="plan_version_id"
+                              defaultValue={String(item.plan_version_id)}
+                              required
+                            />
+                          </label>
+                          <label>
+                            Renewal reason
+                            <input name="reason" required maxLength={500} />
+                          </label>
+                          <button disabled={busy}>Create next term</button>
+                        </form>
+                      </details>
+                    )}
                 </li>
               );
             })}
