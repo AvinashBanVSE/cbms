@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
 use App\Commercial\SubscriptionAddOns;
+use App\Commercial\SubscriptionAmendment;
 use App\Commercial\SubscriptionCoverage;
 use App\Commercial\SubscriptionRenewal;
 use App\Commercial\SubscriptionTerms;
@@ -25,6 +26,7 @@ final class CommercialController
     public function __construct(
         private readonly MainPortalAccess $access,
         private readonly SubscriptionRenewal $renewals,
+        private readonly SubscriptionAmendment $amendments,
         private readonly UsageMeasurement $usage,
     ) {}
 
@@ -286,6 +288,24 @@ final class CommercialController
         [$id, $startsOn, $created] = $this->renewals->manual($subscription, $data['plan_version_id'], $data['reason']);
 
         return response()->json(['id' => $id, 'starts_on' => $startsOn], $created ? 201 : 200);
+    }
+
+    /** Explicitly effective-dated Plan change (§14.9): upgrade/downgrade, immediate or next-cycle. */
+    public function amend(Request $request, string $subscription): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $data = $request->validate([
+            'plan_version_id' => 'required|uuid',
+            'change_type' => 'required|in:upgrade,downgrade',
+            'timing' => 'required|in:immediate,next_cycle',
+            'effective_date' => 'required_if:timing,immediate|missing_unless:timing,immediate|date_format:Y-m-d',
+            'reason' => 'required|string|max:500',
+        ]);
+
+        return response()->json($this->amendments->change(
+            $subscription, $data['plan_version_id'], $data['change_type'], $data['timing'],
+            $data['effective_date'] ?? '', $data['reason'],
+        ), 201)->header('Cache-Control', 'no-store');
     }
 
     public function effectiveEntitlements(string $business): JsonResponse

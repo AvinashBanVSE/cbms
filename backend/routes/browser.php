@@ -234,6 +234,7 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('subscriptions', [CommercialController::class, 'subscription']);
         Route::post('subscriptions/{subscription}/transition', [CommercialController::class, 'transition'])->whereUuid('subscription');
         Route::post('subscriptions/{subscription}/renew', [CommercialController::class, 'renew'])->whereUuid('subscription');
+        Route::post('subscriptions/{subscription}/amend', [CommercialController::class, 'amend'])->whereUuid('subscription');
         Route::get('businesses/{business}/effective-entitlements', [CommercialController::class, 'effectiveEntitlements'])->whereUuid('business');
         Route::post('usage', [CommercialController::class, 'recordUsage']);
         Route::get('businesses/{business}/usage', [CommercialController::class, 'usageStatus'])->whereUuid('business');
