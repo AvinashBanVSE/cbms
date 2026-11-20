@@ -24,4 +24,13 @@ final class GlobalBusinessSettings
         'financial_year_start' => '04-01',
         'financial_year_end' => '03-31',
     ];
+
+    public const REFERENCE_UNITS = [
+        'mass' => ['kg', 'g', 't'],
+        'length' => ['m', 'cm', 'mm'],
+        'volume' => ['L', 'mL'],
+        'area' => ['m²', 'ft²', 'acre'],
+    ];
+
+    public const ADDRESS_FIELDS = ['locality', 'district', 'state_or_union_territory', 'pin_code'];
 }

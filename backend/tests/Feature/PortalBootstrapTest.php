@@ -63,6 +63,10 @@ final class PortalBootstrapTest extends TestCase
                 'number_grouping' => 'Indian', 'calendar' => 'Gregorian', 'measurement_system' => 'Metric',
             ],
             'platform_defaults' => ['language' => 'en', 'financial_year_start' => '04-01', 'financial_year_end' => '03-31'],
+            'reference_data' => [
+                'units' => ['mass' => ['kg', 'g', 't'], 'length' => ['m', 'cm', 'mm'], 'volume' => ['L', 'mL'], 'area' => ['m²', 'ft²', 'acre']],
+                'address_fields' => ['locality', 'district', 'state_or_union_territory', 'pin_code'],
+            ],
         ]);
         $this->postJson('/api/v1/global-business-settings', ['currency' => 'USD'])->assertMethodNotAllowed();
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped', 'Business-context-scoped']];

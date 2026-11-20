@@ -17,6 +17,10 @@ final class GlobalBusinessSettingsController
         return response()->json([
             'stable_core' => GlobalBusinessSettings::STABLE_CORE,
             'platform_defaults' => GlobalBusinessSettings::PLATFORM_DEFAULTS,
+            'reference_data' => [
+                'units' => GlobalBusinessSettings::REFERENCE_UNITS,
+                'address_fields' => GlobalBusinessSettings::ADDRESS_FIELDS,
+            ],
         ])->header('Cache-Control', 'no-store');
     }
 }

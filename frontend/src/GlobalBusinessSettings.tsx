@@ -2,7 +2,24 @@ import { useEffect, useState } from "react";
 import { BusinessTimePresentation } from "./BusinessTimePresentation";
 import { portalRequest } from "./api";
 
+const unitLabels = {
+  mass: "Mass",
+  length: "Length",
+  volume: "Volume",
+  area: "Area",
+};
+const addressLabels: Record<string, string> = {
+  locality: "Locality",
+  district: "District",
+  state_or_union_territory: "State or Union Territory",
+  pin_code: "PIN code",
+};
+
 interface Settings {
+  reference_data?: {
+    units: Record<keyof typeof unitLabels, string[]>;
+    address_fields: string[];
+  };
   stable_core: {
     country: string;
     currency: string;
@@ -77,6 +94,29 @@ export function GlobalBusinessSettings() {
         <dt>Financial year</dt>
         <dd>{year}</dd>
       </dl>
+      {settings.reference_data && (
+        <>
+          <h2>Reference units</h2>
+          <dl>
+            {Object.entries(unitLabels).map(([key, label]) => (
+              <div key={key}>
+                <dt>{label}</dt>
+                <dd>
+                  {settings.reference_data?.units[
+                    key as keyof typeof unitLabels
+                  ].join(", ")}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <h2>Indian address reference fields</h2>
+          <ul>
+            {settings.reference_data.address_fields.map((field) => (
+              <li key={field}>{addressLabels[field]}</li>
+            ))}
+          </ul>
+        </>
+      )}
       <BusinessTimePresentation timeZone={stable.time_zone} />
     </>
   );

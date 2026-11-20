@@ -176,6 +176,10 @@ it("shows the Indian platform settings and manages the clock format", async () =
           calendar: "Gregorian",
           measurement_system: "Metric",
         },
+        reference_data: {
+          units: { mass: ["kg"], length: ["m"], volume: ["L"], area: ["acre"] },
+          address_fields: ["district", "pin_code"],
+        },
         platform_defaults: {
           language: "en",
           financial_year_start: "04-01",
@@ -190,9 +194,11 @@ it("shows the Indian platform settings and manages the clock format", async () =
     "Global Business Settings",
   );
   const settings = document.querySelector(".workspace-content")!;
-  const values = Array.from(settings.querySelectorAll("dd")).map(
-    (value) => value.textContent,
-  );
+  expect(settings.textContent).toContain("PIN code");
+  expect(settings.textContent).toContain("acre");
+  const values = Array.from(settings.querySelectorAll("dd"))
+    .slice(0, 8)
+    .map((value) => value.textContent);
   expect(values).toEqual([
     "India",
     "INR",
