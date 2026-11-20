@@ -6,7 +6,8 @@ export type PresentationSetting =
   | "clock"
   | "date_format"
   | "week_start"
-  | "negative_amount";
+  | "negative_amount"
+  | "working_days";
 
 const options: Record<
   PresentationSetting,
@@ -23,6 +24,18 @@ const options: Record<
   negative_amount: {
     label: "Negative amount display",
     values: { minus: "Minus sign", parentheses: "Parentheses" },
+  },
+  working_days: {
+    label: "Working days",
+    values: {
+      "1": "Monday",
+      "2": "Tuesday",
+      "3": "Wednesday",
+      "4": "Thursday",
+      "5": "Friday",
+      "6": "Saturday",
+      "7": "Sunday",
+    },
   },
   week_start: {
     label: "First day of the week",
@@ -41,11 +54,11 @@ const options: Record<
 interface ClockSettings {
   business_id: string;
   scope: "platform" | "organization" | "business";
-  effective: Partial<Record<PresentationSetting, string | null>> & {
+  effective: Partial<Record<PresentationSetting, string | string[] | null>> & {
     source: string;
   };
   upstream_lock: string | null;
-  local: Partial<Record<PresentationSetting, string | null>> & {
+  local: Partial<Record<PresentationSetting, string | string[] | null>> & {
     override_allowed: boolean;
     locked: boolean;
     version: number;
@@ -63,7 +76,13 @@ const sourceNames: Record<string, string> = {
 export function BusinessTimePresentation({
   timeZone = "Asia/Kolkata",
   organization = false,
-  settingsKeys = ["clock", "date_format", "week_start", "negative_amount"],
+  settingsKeys = [
+    "clock",
+    "date_format",
+    "week_start",
+    "working_days",
+    "negative_amount",
+  ],
 }: {
   timeZone?: string;
   organization?: boolean;
@@ -114,7 +133,12 @@ export function BusinessTimePresentation({
     if (!settings) return;
     const fields = new FormData(event.currentTarget);
     const values = {
-      [setting]: String(fields.get(setting) ?? "") || null,
+      [setting]:
+        setting === "working_days"
+          ? fields.get("working_days_mode") === "custom"
+            ? fields.getAll(setting).map(String)
+            : null
+          : String(fields.get(setting) ?? "") || null,
       expected_version: settings.local.version,
     };
     if (organization) return send(organizationEndpoint, values);
@@ -149,8 +173,17 @@ export function BusinessTimePresentation({
 
   const effective = settings?.effective[setting];
   const definition = options[setting];
+  const local = settings?.local[setting];
+  const effectiveLabel = Array.isArray(effective)
+    ? effective.map((value) => definition.values[value]).join(", ") ||
+      "No working days"
+    : effective
+      ? definition.values[effective]
+      : setting === "working_days"
+        ? "No default configured"
+        : "Locale default";
   const preview =
-    effective && setting === "date_format"
+    typeof effective === "string" && setting === "date_format"
       ? formatPresentedDate(new Date(), effective, timeZone)
       : setting === "clock"
         ? new Intl.DateTimeFormat("en-IN", {
@@ -200,8 +233,7 @@ export function BusinessTimePresentation({
         <>
           <p>
             {setting === "clock" ? "Effective clock" : definition.label}:{" "}
-            {effective ? definition.values[effective] : "Locale default"} ·
-            Source: {sourceNames[settings.effective.source]}
+            {effectiveLabel} · Source: {sourceNames[settings.effective.source]}
             {preview && " · Preview: " + preview}
           </p>
           {settings.upstream_lock && (
@@ -215,20 +247,49 @@ export function BusinessTimePresentation({
               data-operation="save-time-presentation"
               onSubmit={save}
             >
-              <label>
-                {definition.label}
-                <select
-                  name={setting}
-                  defaultValue={settings.local[setting] ?? ""}
-                >
-                  <option value="">Use governing default</option>
-                  {Object.entries(definition.values).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {setting === "working_days" ? (
+                <>
+                  <label>
+                    Working-day policy
+                    <select
+                      name="working_days_mode"
+                      defaultValue={Array.isArray(local) ? "custom" : "inherit"}
+                    >
+                      <option value="inherit">Use governing default</option>
+                      <option value="custom">Use selected days</option>
+                    </select>
+                  </label>
+                  <label>
+                    Working days
+                    <select
+                      name={setting}
+                      multiple
+                      defaultValue={Array.isArray(local) ? local : []}
+                    >
+                      {Object.entries(definition.values).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <label>
+                  {definition.label}
+                  <select
+                    name={setting}
+                    defaultValue={typeof local === "string" ? local : ""}
+                  >
+                    <option value="">Use governing default</option>
+                    {Object.entries(definition.values).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {!organization && settings.scope !== "platform" && (
                 <label>
                   <input

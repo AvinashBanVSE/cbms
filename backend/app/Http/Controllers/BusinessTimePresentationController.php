@@ -35,12 +35,15 @@ final class BusinessTimePresentationController
     {
         $this->access->requirePermission('global_business_settings.manage');
         $input = $request->validate([
-            $setting => ['present', 'nullable', Rule::in(BusinessTimePresentation::OPTIONS[$setting])],
+            ...$this->valueRules($setting),
             'override_allowed' => 'required|boolean',
             'locked' => 'required|boolean',
             'expected_version' => 'required|integer|min:0',
         ]);
 
+        if ($setting === 'working_days' && $input[$setting] !== null) {
+            sort($input[$setting], SORT_STRING);
+        }
         $result = DB::transaction(function () use ($business, $input, $setting): array {
             $portal = DB::table('portal_installation')->where('id', 1)->lockForUpdate()->value('portal_id');
             $this->access->requirePermission('global_business_settings.manage');
@@ -75,11 +78,14 @@ final class BusinessTimePresentationController
     {
         $this->organizations->requireOrganization(setting: $setting);
         $input = $request->validate([
-            $setting => ['present', 'nullable', Rule::in(BusinessTimePresentation::OPTIONS[$setting])],
+            ...$this->valueRules($setting),
             'expected_version' => 'required|integer|min:0',
             'override_allowed' => 'prohibited',
             'locked' => 'prohibited',
         ]);
+        if ($setting === 'working_days' && $input[$setting] !== null) {
+            sort($input[$setting], SORT_STRING);
+        }
         $result = DB::transaction(function () use ($input, $setting): array {
             $portal = DB::table('portal_installation')->where('id', 1)->lockForUpdate()->value('portal_id');
             $business = $this->organizations->requireOrganization(lock: true, setting: $setting);
@@ -138,6 +144,15 @@ final class BusinessTimePresentationController
     public function setPreferenceAccess(Request $request, string $setting, string $business): JsonResponse
     {
         return $this->setOrganizationAccess($request, $business, $setting);
+    }
+
+    private function valueRules(string $setting): array
+    {
+        $allowed = Rule::in(BusinessTimePresentation::OPTIONS[$setting]);
+
+        return $setting === 'working_days'
+            ? ['working_days' => 'present|nullable|array|list|max:7', 'working_days.*' => ['required', 'string', 'distinct:strict', $allowed]]
+            : [$setting => ['present', 'nullable', $allowed]];
     }
 
     private function persist(string $portal, array $current, array $next, string $setting): array

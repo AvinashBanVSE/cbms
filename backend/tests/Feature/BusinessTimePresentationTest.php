@@ -62,6 +62,19 @@ final class BusinessTimePresentationTest extends TestCase
         $this->postJson($base, [...$command, 'expected_version' => 2])->assertOk();
         $this->getJson($base.'/'.$shop)->assertOk()->assertJsonPath('effective.source', 'business');
         $this->assertSame(6, DB::table('portal_events')->where('action', 'global_business_settings.time_presentation_changed')->count());
+
+        $workingDays = '/api/v1/global-business-settings/calendar-presentation/working_days';
+        $days = ['working_days' => ['5', '1', '3'], 'expected_version' => 0, 'override_allowed' => false, 'locked' => false];
+        $this->postJson($workingDays, [...$days, 'working_days' => ['1', '1']])->assertUnprocessable();
+        $this->postJson($workingDays, $days)->assertOk()->assertJsonPath('effective.working_days', ['1', '3', '5']);
+        $this->getJson($workingDays.'/'.$shop)->assertOk()->assertJsonPath('effective.source', 'platform');
+        $this->postJson($workingDays.'/'.$organization, [...$days, 'working_days' => [], 'override_allowed' => true])
+            ->assertOk()->assertJsonPath('effective.working_days', []);
+        $this->getJson($workingDays.'/'.$shop)->assertOk()->assertJsonPath('effective.working_days', [])
+            ->assertJsonPath('effective.source', 'organization');
+        $this->getJson($workingDays.'/'.$otherOrganization)->assertOk()->assertJsonPath('effective.working_days', ['1', '3', '5']);
+        $this->postJson($workingDays.'/'.$organization, [...$days, 'working_days' => null, 'expected_version' => 1, 'override_allowed' => true])
+            ->assertOk()->assertJsonPath('effective.working_days', ['1', '3', '5'])->assertJsonPath('effective.source', 'platform');
     }
 
     public function test_delegated_editor_can_change_only_the_authorized_organization_clock(): void

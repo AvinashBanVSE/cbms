@@ -124,10 +124,18 @@ final class BusinessLifecycleTest extends TestCase
         $first = $this->command('Closed', 0);
         $this->postJson($path, $first)->assertAccepted()->assertJsonPath('approval_id', $first['operation_id']);
         $this->postJson($path, $first)->assertAccepted()->assertJsonPath('approval_id', $first['operation_id']);
-        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonPath('data.0.id', $first['operation_id']);
+        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonPath('data.0.id', $first['operation_id'])
+            ->assertJsonPath('data.0.can_decide', false);
+        $observer = Str::uuid7()->toString();
+        DB::table('users')->insert(['id' => $observer, 'code' => 'AA1934', 'email' => 'observer@example.test', 'password' => 'unused']);
+        DB::table('portal_grants')->insert([...$permission, 'user_id' => $observer]);
+        $this->actingAs(User::findOrFail($observer));
+        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonCount(0, 'data');
+        $this->actingAs($requester);
         $decision = $path.'/closure-approvals/'.$first['operation_id'];
         $this->postJson($decision, ['decision' => 'approve'])->assertForbidden();
         $this->actingAs(User::findOrFail($reviewer));
+        $this->getJson($path.'/closure-approvals')->assertOk()->assertJsonPath('data.0.can_decide', true);
         $this->postJson(str_replace($business, $other, $decision), ['decision' => 'approve'])->assertNotFound();
         $this->travel(1)->minute();
         $this->postJson($decision, ['decision' => 'approve'])->assertConflict()->assertJsonPath('status', 'expired');

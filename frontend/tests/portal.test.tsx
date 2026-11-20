@@ -57,6 +57,31 @@ it("shows the Indian platform settings and manages the clock format", async () =
       return json({ ...adminWorkspace, administration: ["business_settings"] });
     if (
       path.startsWith(
+        "global-business-settings/calendar-presentation/working_days",
+      )
+    ) {
+      if (body)
+        expect(body).toMatchObject({
+          working_days: ["1", "5"],
+          expected_version: 1,
+        });
+      const working_days = body ? ["1", "5"] : ["1", "3"];
+      return json({
+        business_id: "platform",
+        scope: "platform",
+        effective: { working_days, source: "platform" },
+        upstream_lock: null,
+        local: {
+          working_days,
+          override_allowed: false,
+          locked: false,
+          version: body ? 2 : 1,
+        },
+        can_manage: true,
+      });
+    }
+    if (
+      path.startsWith(
         "global-business-settings/calendar-presentation/date_format",
       )
     ) {
@@ -229,6 +254,18 @@ it("shows the Indian platform settings and manages the clock format", async () =
   )!.value = "year-month-day";
   await submit(editor);
   expect(settings.textContent).toContain("Date format: YYYY-MM-DD");
+  await act(async () => {
+    preference.value = "working_days";
+    preference.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await submit(load);
+  expect(settings.textContent).toContain("Working days: Monday, Wednesday");
+  for (const option of document.querySelector<HTMLSelectElement>(
+    editor + ' select[name="working_days"]',
+  )!.options)
+    option.selected = ["1", "5"].includes(option.value);
+  await submit(editor);
+  expect(settings.textContent).toContain("Working days: Monday, Friday");
 });
 
 it("edits the clock in the Organization workspace without governance controls", async () => {
@@ -1719,6 +1756,7 @@ it("submits and reviews a governed business closure", async () => {
                 id: "approval-1",
                 reason: "Confirmed closure",
                 expires_at: "2032-03-29T09:00:00Z",
+                can_decide: true,
               },
             ]
           : [],

@@ -13,6 +13,7 @@ final class OrganizationTimePresentationAccess
     public const PERMISSIONS = [
         'clock' => 'business_time_presentation.update',
         'date_format' => 'business_calendar_presentation.date_format.update',
+        'working_days' => 'business_calendar_presentation.working_days.update',
         'week_start' => 'business_calendar_presentation.week_start.update',
         'negative_amount' => 'business_number_presentation.negative_amount.update',
     ];

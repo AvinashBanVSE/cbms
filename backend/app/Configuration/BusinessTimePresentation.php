@@ -12,6 +12,7 @@ final class BusinessTimePresentation
         'clock' => ['12-hour', '24-hour'],
         'date_format' => ['day-month-year', 'year-month-day'],
         'negative_amount' => ['minus', 'parentheses'],
+        'working_days' => ['1', '2', '3', '4', '5', '6', '7'],
         'week_start' => ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
     ];
 
@@ -25,7 +26,11 @@ final class BusinessTimePresentation
             return;
         }
 
-        $entry = ['value' => $values[$setting], ...array_diff_key($values, [$setting => true])];
+        $value = $values[$setting];
+        if ($setting === 'working_days' && $value !== null) {
+            $value = implode('', $value);
+        }
+        $entry = ['value' => $value, ...array_diff_key($values, [$setting => true])];
         DB::table('business_presentation_preferences')->upsert(
             ['business_id' => $business, 'setting' => $setting, ...$entry],
             ['business_id', 'setting'], array_keys($entry),
@@ -66,7 +71,7 @@ final class BusinessTimePresentation
                 continue;
             }
             if ($entry->value !== null) {
-                $effective[$setting] = $entry->value;
+                $effective[$setting] = $this->value($setting, $entry->value);
                 $effective['source'] = $scope;
             }
             if ($entry->locked) {
@@ -78,9 +83,14 @@ final class BusinessTimePresentation
             'business_id' => $business, 'scope' => $chain[$business], 'effective' => $effective,
             'upstream_lock' => $upstreamLock,
             'local' => [
-                $setting => $local?->value, 'override_allowed' => (bool) ($local?->override_allowed ?? false),
+                $setting => $this->value($setting, $local?->value), 'override_allowed' => (bool) ($local?->override_allowed ?? false),
                 'locked' => (bool) ($local?->locked ?? false), 'version' => (int) ($local?->version ?? 0),
             ],
         ];
+    }
+
+    private function value(string $setting, ?string $value): string|array|null
+    {
+        return $setting === 'working_days' && $value !== null ? str_split($value) : $value;
     }
 }

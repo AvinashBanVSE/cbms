@@ -69,14 +69,16 @@ final class BusinessLifecycleController
     {
         $this->access->requirePermission('business_structure.lifecycle');
         abort_unless(DB::table('business_identities')->where('id', $business)->whereIn('kind', BusinessLifecycle::KINDS)->exists(), 404);
+        $actor = (string) Auth::id();
         $approvals = DB::table('business_closure_approvals')->where(['business_id' => $business, 'status' => 'pending'])
+            ->where(fn ($visible) => $visible->where('requester_id', $actor)->orWhereJsonContains('reviewers', $actor))
             ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-            ->orderBy('id')->simplePaginate(30, ['id', 'command', 'expires_at'])
-            ->through(static function (object $row): array {
+            ->orderBy('id')->simplePaginate(30, ['id', 'requester_id', 'command', 'expires_at'])
+            ->through(static function (object $row) use ($actor): array {
                 $command = json_decode($row->command, true, flags: JSON_THROW_ON_ERROR);
 
                 return [
-                    'id' => $row->id, 'reason' => $command['reason'],
+                    'id' => $row->id, 'reason' => $command['reason'], 'can_decide' => $row->requester_id !== $actor,
                     'expires_at' => $row->expires_at === null ? null : CarbonImmutable::parse($row->expires_at)->toISOString(),
                 ];
             });

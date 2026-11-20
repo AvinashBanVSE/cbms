@@ -67,13 +67,13 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('organization-time-presentation', [BusinessTimePresentationController::class, 'showOrganization']);
     Route::post('organization-time-presentation', [BusinessTimePresentationController::class, 'updateOrganization']);
     Route::get('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'showPreference'])
-        ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
+        ->whereIn('setting', ['date_format', 'week_start', 'working_days'])->whereUuid('business');
     Route::post('global-business-settings/calendar-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'updatePreference'])
-        ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
+        ->whereIn('setting', ['date_format', 'week_start', 'working_days'])->whereUuid('business');
     Route::post('global-business-settings/calendar-presentation/{setting}/{business}/access', [BusinessTimePresentationController::class, 'setPreferenceAccess'])
-        ->whereIn('setting', ['date_format', 'week_start'])->whereUuid('business');
-    Route::get('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->whereIn('setting', ['date_format', 'week_start']);
-    Route::post('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->whereIn('setting', ['date_format', 'week_start']);
+        ->whereIn('setting', ['date_format', 'week_start', 'working_days'])->whereUuid('business');
+    Route::get('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->whereIn('setting', ['date_format', 'week_start', 'working_days']);
+    Route::post('organization-calendar-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->whereIn('setting', ['date_format', 'week_start', 'working_days']);
     Route::get('global-business-settings/number-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'showPreference'])
         ->where('setting', 'negative_amount')->whereUuid('business');
     Route::post('global-business-settings/number-presentation/{setting}/{business?}', [BusinessTimePresentationController::class, 'updatePreference'])

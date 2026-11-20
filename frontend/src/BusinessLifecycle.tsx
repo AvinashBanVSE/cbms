@@ -10,7 +10,12 @@ interface LifecycleState {
 }
 
 interface ClosureQueue {
-  data: { id: string; reason: string; expires_at: string | null }[];
+  data: {
+    id: string;
+    reason: string;
+    expires_at: string | null;
+    can_decide: boolean;
+  }[];
   next_page_url: string | null;
 }
 
@@ -196,18 +201,22 @@ export function BusinessLifecycle({
                           {indiaTime.format(new Date(request.expires_at))}
                         </p>
                       )}
-                      <button
-                        disabled={busy}
-                        onClick={() => decide(request.id, "approve")}
-                      >
-                        Approve closure
-                      </button>
-                      <button
-                        disabled={busy}
-                        onClick={() => decide(request.id, "reject")}
-                      >
-                        Reject closure
-                      </button>
+                      {request.can_decide && (
+                        <>
+                          <button
+                            disabled={busy}
+                            onClick={() => decide(request.id, "approve")}
+                          >
+                            Approve closure
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() => decide(request.id, "reject")}
+                          >
+                            Reject closure
+                          </button>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
