@@ -44,6 +44,7 @@ final class PortalBootstrapTest extends TestCase
         $owner = $this->postJson('/api/v1/installation/owner', ['name' => 'Owner', ...$credentials], $headers)->assertCreated();
         $this->assertMatchesRegularExpression('/^[A-Z]{2}[0-9]{4}$/', $owner->json('user_code'));
         $this->getJson('/api/v1/services/categories')->assertUnauthorized();
+        $this->getJson('/api/v1/global-business-settings')->assertUnauthorized();
         $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
         $this->postJson('/api/v1/installation/owner', [], $headers)->assertConflict();
         $this->postJson('/api/v1/login', ['code' => $owner->json('user_code'), ...$credentials, 'password' => 'invalid'])->assertUnauthorized();
@@ -54,8 +55,16 @@ final class PortalBootstrapTest extends TestCase
         ]);
         $this->getJson('/api/v1/services/categories')->assertOk()->assertJsonCount(15);
         $this->getJson('/api/v1/workspace-access')->assertOk()->assertHeader('Cache-Control', 'no-store, private')
-            ->assertExactJson(['administration' => ['services', 'businesses', 'identities', 'users', 'commercial', 'provider_users', 'audit'], 'mapping_contexts' => [], 'delegations' => []]);
+            ->assertExactJson(['administration' => ['services', 'businesses', 'identities', 'users', 'commercial', 'provider_users', 'audit', 'business_settings'], 'mapping_contexts' => [], 'delegations' => []]);
         $this->getJson('/api/v1/audit-trail')->assertOk();
+        $this->getJson('/api/v1/global-business-settings')->assertOk()->assertExactJson([
+            'stable_core' => [
+                'country' => 'IN', 'currency' => 'INR', 'time_zone' => 'Asia/Kolkata',
+                'number_grouping' => 'Indian', 'calendar' => 'Gregorian', 'measurement_system' => 'Metric',
+            ],
+            'platform_defaults' => ['language' => 'en', 'financial_year_start' => '04-01', 'financial_year_end' => '03-31'],
+        ]);
+        $this->postJson('/api/v1/global-business-settings', ['currency' => 'USD'])->assertMethodNotAllowed();
         $service = ['category' => 'B1', 'name' => 'Delivery', 'purpose' => 'Deliver approved messages', 'scopes' => ['Tenant-scoped']];
         $id = $this->postJson('/api/v1/services', $service)->assertCreated()->json('id');
         $this->getJson('/api/v1/services')->assertOk()->assertJsonPath('data.0.id', $id);
@@ -76,6 +85,7 @@ final class PortalBootstrapTest extends TestCase
             ->assertExactJson(['administration' => ['commercial'], 'mapping_contexts' => [], 'delegations' => []]);
         $this->getJson('/api/v1/commercial?section=accounts')->assertOk();
         $this->getJson('/api/v1/audit-trail')->assertForbidden();
+        $this->getJson('/api/v1/global-business-settings')->assertForbidden();
         $this->getJson("/api/v1/services/{$id}/capabilities")->assertForbidden();
         $this->postJson('/api/v1/services', $service)->assertForbidden();
         $this->getJson('/api/v1/services/categories')->assertForbidden();

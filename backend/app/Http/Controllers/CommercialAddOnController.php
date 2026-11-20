@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Authorization\MainPortalAccess;
 use App\Commercial\SubscriptionAddOns;
 use App\Commercial\SubscriptionTerms;
+use App\Configuration\GlobalBusinessSettings;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -96,7 +97,7 @@ final class CommercialAddOnController
 
                 return response()->json($existing);
             }
-            abort_if($term->state !== 'Pending Activation' || $term->ends_before <= now('Asia/Kolkata')->toDateString()
+            abort_if($term->state !== 'Pending Activation' || $term->ends_before <= now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString()
                 || SubscriptionTerms::invoiceForSettlement($subscription) !== null, 409, 'Attach Add-ons to a pending term before its invoice is issued.');
             abort_if(SubscriptionAddOns::total($term) + (int) $version->amount_paise > 999999999999, 422, 'The term amount exceeds the supported invoice amount.');
             $assignment['add_on_version_id'] = $version->id;

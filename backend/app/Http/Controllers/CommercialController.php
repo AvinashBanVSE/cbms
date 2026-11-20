@@ -8,6 +8,7 @@ use App\Authorization\MainPortalAccess;
 use App\Commercial\SubscriptionCoverage;
 use App\Commercial\SubscriptionRenewal;
 use App\Commercial\SubscriptionTerms;
+use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
@@ -52,10 +53,10 @@ final class CommercialController
             ? DB::table('commercial_subscription_add_ons')->whereIn('subscription_id', $result->getCollection()->pluck('id'))
                 ->orderBy('business_id')->orderBy('add_on_id')->get()->groupBy('subscription_id')
             : collect();
-        $today = now('Asia/Kolkata')->toDateString();
+        $today = now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
         $result->through(function (object $row) use ($section, $coverage, $addOns, $today): object {
             if (in_array($section, ['versions', 'add_on_versions'], true)) {
-                $row->currency = 'INR';
+                $row->currency = GlobalBusinessSettings::CURRENCY;
                 $row->entitlements = json_decode($row->entitlements, true, flags: JSON_THROW_ON_ERROR);
                 $row->published_at = CarbonImmutable::parse($row->published_at, 'UTC')->utc()->toISOString();
             }
@@ -188,7 +189,7 @@ final class CommercialController
                 $coverage = [$organization];
             }
 
-            $start = CarbonImmutable::createFromFormat('!Y-m-d', $data['starts_on'], 'Asia/Kolkata');
+            $start = CarbonImmutable::createFromFormat('!Y-m-d', $data['starts_on'], GlobalBusinessSettings::BUSINESS_TIME_ZONE);
             $id = Str::uuid7()->toString();
             DB::table('commercial_subscriptions')->insert([
                 'id' => $id, 'account_id' => $account->id, 'plan_version_id' => $data['plan_version_id'],
@@ -220,7 +221,7 @@ final class CommercialController
             abort_if($account === null, 404);
             $provider = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->value('provider_id');
             $record = DB::table('commercial_subscriptions')->where('id', $subscription)->lockForUpdate()->first();
-            $today = now('Asia/Kolkata')->toDateString();
+            $today = now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
             abort_unless($record->state === $data['expected_state'], 409, 'The Subscription state changed. Reload the commercial records.');
             abort_if($record->ends_before <= $today, 409, 'The Subscription term has ended.');
 
@@ -270,7 +271,7 @@ final class CommercialController
             ->whereIn('kind', ['Organization', 'Distributor', 'Shop'])->first(['id', 'kind', 'parent_id']);
         abort_if($identity === null, 404);
         $organization = $identity->kind === 'Organization' ? $identity->id : $identity->parent_id;
-        $today = now('Asia/Kolkata')->toDateString();
+        $today = now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
         $eligibleTerms = DB::table('commercial_subscription_coverage as coverage')
             ->join('commercial_subscriptions as subscription', 'subscription.id', '=', 'coverage.subscription_id')
             ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')

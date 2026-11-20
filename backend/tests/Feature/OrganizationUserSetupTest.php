@@ -302,10 +302,35 @@ final class OrganizationUserSetupTest extends TestCase
         $request = $this->postJson("{$assignment}/assign", ['code' => 'AA6114'])->assertAccepted()->assertJsonPath('status', 'pending')->json('id');
         $this->postJson("{$assignment}/assign", ['code' => 'AA6114'])->assertAccepted()->assertJsonPath('id', $request);
         $this->getJson($approval)->assertOk()->assertJsonPath('data.0.id', $request);
+        $otherShop = Str::uuid7()->toString();
+        DB::table('business_identities')->insert([
+            'id' => $otherShop, 'kind' => 'Shop', 'professional_name' => 'Other Shop',
+            'parent_id' => DB::table('business_identities')->where('id', $shop)->value('parent_id'),
+        ]);
+        $otherBase = "/api/v1/tenants/{$tenant}/businesses/{$otherShop}";
+        $otherRole = $this->postJson("{$otherBase}/roles", ['name' => 'Reviewer', 'actions' => ['mapping.confirm']])->assertCreated()->json('id');
+        $this->postJson("{$otherBase}/role-approvals/policy", $policy)->assertOk();
+        $otherRequest = $this->postJson("{$otherBase}/roles/{$otherRole}/assign", ['code' => 'AA6114'])->assertAccepted()->json('id');
         $decision = "{$approval}/{$request}/decision";
         $this->postJson($decision, ['decision' => 'approve'])->assertForbidden();
         $this->assertDatabaseCount('organization_role_assignments', 0);
-        $this->postJson("{$approval}/policy", ['operation' => 'assign', 'stages' => []])->assertOk();
+        $this->postJson("{$approval}/policy", ['operation' => 'revoke', 'stages' => [], 'cancel_pending' => true])
+            ->assertExactJson(['stage_count' => 0, 'cancelled_requests' => 0]);
+        $this->getJson($approval)->assertOk()->assertJsonPath('data.0.id', $request);
+        $this->postJson("{$approval}/policy", [...$policy, 'cancel_pending' => true])
+            ->assertExactJson(['stage_count' => 2, 'cancelled_requests' => 1]);
+        $this->getJson($approval)->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson("{$otherBase}/role-approvals")->assertOk()->assertJsonPath('data.0.id', $otherRequest);
+        $this->assertDatabaseHas('portal_events', [
+            'subject_id' => $request, 'action' => 'organization_role.approval_finished', 'actor_id' => $administrator->id,
+        ]);
+        $this->actingAs(User::where('code', 'AA6111')->firstOrFail());
+        $this->postJson($decision, ['decision' => 'approve'])->assertConflict();
+        $this->actingAs($administrator);
+        $replacement = $this->postJson("{$assignment}/assign", ['code' => 'AA6114'])->assertAccepted()->json('id');
+        $this->assertNotSame($request, $replacement);
+        $decision = "{$approval}/{$replacement}/decision";
+        $this->postJson("{$approval}/policy", ['operation' => 'assign', 'stages' => []])->assertExactJson(['stage_count' => 0]);
 
         $vote = ['decision' => 'approve'];
         $this->actingAs(User::where('code', 'AA6113')->firstOrFail());
@@ -318,6 +343,15 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson($decision, $vote)->assertOk()->assertJsonPath('stage', 1);
         $this->assertDatabaseCount('organization_role_assignments', 0);
         $this->actingAs(User::where('code', 'AA6113')->firstOrFail());
+        $earlierGrant = [
+            'user_id' => User::where('code', 'AA6111')->value('id'),
+            'business_id' => $main, 'permission' => 'organization_users.manage',
+        ];
+        DB::table('portal_grants')->where($earlierGrant)->delete();
+        $this->postJson($decision, $vote)->assertConflict();
+        $this->assertDatabaseCount('organization_role_assignments', 0);
+        $this->assertDatabaseMissing('role_approval_votes', ['request_id' => $replacement, 'stage' => 1]);
+        DB::table('portal_grants')->insert($earlierGrant);
         $this->postJson($decision, $vote)->assertOk()->assertJsonPath('status', 'approved');
         $this->postJson($decision, $vote)->assertConflict();
         $this->assertDatabaseHas('organization_role_assignments', ['user_id' => $target, 'role_id' => $role]);

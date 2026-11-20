@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CommercialWorkspace } from "./CommercialWorkspace";
 import { AuditTrail } from "./AuditTrail";
 import { AuthenticatorSettings } from "./AuthenticatorSettings";
+import { GlobalBusinessSettings } from "./GlobalBusinessSettings";
 import { LegalIdentities } from "./LegalIdentities";
 import { portalRequest, PortalRequestError } from "./api";
 import "./portal.css";
@@ -49,6 +50,7 @@ const administration = {
   commercial: ["Commercial", "Commercial management"],
   audit: ["Audit Trail", "Audit Trail"],
   provider_users: ["Sub-Portal users", "Sub-Portal user administration"],
+  business_settings: ["Business settings", "Global Business Settings"],
 } as const;
 type AdministrationSection = keyof typeof administration;
 
@@ -321,6 +323,8 @@ export function Portal() {
                     <AuditTrail />
                   ) : section === "provider_users" ? (
                     <ProviderAccounts />
+                  ) : section === "business_settings" ? (
+                    <GlobalBusinessSettings />
                   ) : section === "identities" ? (
                     <LegalIdentities />
                   ) : section === "users" ? (

@@ -50,6 +50,21 @@ final class RoleAssignmentWorkflow
         return ['status' => 'pending', 'id' => $id];
     }
 
+    public function cancelPending(string $business, bool $assign, string $actor): int
+    {
+        $requests = DB::table('role_approval_requests')->where('status', 'pending')->where('assign', $assign)
+            ->whereIn('role_id', DB::table('organization_business_roles')->where('business_id', $business)->select('id'));
+        $ids = $requests->orderBy('id')->pluck('id');
+        $requests->update(['status' => 'cancelled']);
+        foreach ($ids as $id) {
+            $this->audit('organization_role.approval_finished', $id, $actor, [
+                'status' => 'cancelled', 'reason' => 'policy_changed', 'business_id' => $business,
+            ]);
+        }
+
+        return $ids->count();
+    }
+
     public function apply(array $binding, string $business, bool $assign, string $actor, ?string $approval = null): void
     {
         if ($assign) {

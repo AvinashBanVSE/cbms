@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Commercial;
 
+use App\Configuration\GlobalBusinessSettings;
 use Illuminate\Support\Facades\DB;
 
 final class SubscriptionCoverage
@@ -19,7 +20,7 @@ final class SubscriptionCoverage
 
     public static function includeNewChild(string $organization, string $child): void
     {
-        $today = now('Asia/Kolkata')->toDateString();
+        $today = now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
         DB::table('commercial_subscriptions as subscription')
             ->join('commercial_accounts as account', 'account.id', '=', 'subscription.account_id')
             ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')

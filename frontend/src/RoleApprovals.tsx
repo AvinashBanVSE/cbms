@@ -59,9 +59,17 @@ export function RoleApprovals({ base }: { base: string }) {
         await portalRequest(base + "/policy", {
           operation: String(data.get("operation")),
           stages,
+          ...(data.has("cancel_pending") ? { cancel_pending: true } : {}),
         })
       ).json();
-      setNotice("Approval policy saved. Stages: " + result.stage_count);
+      if (result.cancelled_requests !== undefined) {
+        await load(1);
+        setNotice(
+          `Approval policy saved. Stages: ${result.stage_count}. Pending requests cancelled: ${result.cancelled_requests}.`,
+        );
+      } else {
+        setNotice("Approval policy saved. Stages: " + result.stage_count);
+      }
     });
   }
 
@@ -97,6 +105,10 @@ export function RoleApprovals({ base }: { base: string }) {
           such as 2: AB1234, CD5678. A blank policy requires no approval for new
           requests.
         </p>
+        <label>
+          <input type="checkbox" name="cancel_pending" />
+          Cancel pending requests for the selected operation in this business
+        </label>
         <button disabled={busy}>Save approval policy</button>
       </form>
       <button disabled={busy} onClick={() => run(() => load(1))}>

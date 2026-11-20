@@ -50,6 +50,68 @@ const adminWorkspace = {
   delegations: [],
 };
 
+it("shows the Indian platform settings in the authorized workspace", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["business_settings"] });
+    if (path === "global-business-settings")
+      return json({
+        stable_core: {
+          country: "IN",
+          currency: "INR",
+          time_zone: "Asia/Kolkata",
+          number_grouping: "Indian",
+          calendar: "Gregorian",
+          measurement_system: "Metric",
+        },
+        platform_defaults: {
+          language: "en",
+          financial_year_start: "04-01",
+          financial_year_end: "03-31",
+        },
+      });
+    throw new Error(path);
+  });
+
+  await render();
+  expect(document.querySelector("h1")?.textContent).toBe(
+    "Global Business Settings",
+  );
+  const settings = document.querySelector(".workspace-content")!;
+  const values = Array.from(settings.querySelectorAll("dd")).map(
+    (value) => value.textContent,
+  );
+  expect(values).toEqual([
+    "India",
+    "INR",
+    "Asia/Kolkata",
+    "Indian",
+    "Gregorian",
+    "Metric",
+    "English",
+    "1 April to 31 March",
+  ]);
+  expect(settings.querySelector("form")).toBeNull();
+});
+
+it("reports a rejected settings request when the read grant is revoked", async () => {
+  request.mockImplementation(async (path) => {
+    if (path === "installation") return json({ stage: "ready" });
+    if (path === "workspace-access")
+      return json({ ...adminWorkspace, administration: ["business_settings"] });
+    if (path === "global-business-settings")
+      throw new Error("Access to business settings has ended.");
+    throw new Error(path);
+  });
+
+  await render();
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+    "Access to business settings has ended.",
+  );
+  expect(document.querySelector(".workspace-content dl")).toBeNull();
+});
+
 it("keeps dashboard appearance preferences after a reload", async () => {
   request.mockImplementation(async (path) => {
     if (path === "installation") return json({ stage: "ready" });
@@ -1221,7 +1283,12 @@ it("registers a role and changes the selected user's assignment", async () => {
       expect(body).toEqual({
         operation: "assign",
         stages: [{ required: 2, reviewers: ["AA0011", "AA0012"] }],
+        ...(body?.cancel_pending ? { cancel_pending: true } : {}),
       });
+      if (body?.cancel_pending) {
+        pending = false;
+        return json({ stage_count: 1, cancelled_requests: 1 });
+      }
       return json({ stage_count: 1 });
     }
     if (path === approvals + "?page=1")
@@ -1315,6 +1382,12 @@ it("registers a role and changes the selected user's assignment", async () => {
   )[3];
   await act(async () => reject.click());
   expect(document.body.textContent).toContain("Request status: rejected");
+  document.querySelector<HTMLInputElement>(
+    policy + ' [name="cancel_pending"]',
+  )!.checked = true;
+  await submit(policy);
+  expect(document.body.textContent).toContain("Pending requests cancelled: 1");
+  expect(document.body.textContent).not.toContain("Assign Shop liaison");
   set(assignment, "code", "AA4010");
   await click("Remove role");
   expect(request).toHaveBeenCalledWith(base + "/role1/revoke", {

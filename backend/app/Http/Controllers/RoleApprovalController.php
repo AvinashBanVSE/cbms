@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Approval\RoleAssignmentWorkflow;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\OrganizationBusinessRoles;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -25,6 +26,7 @@ final class RoleApprovalController
         OrganizationBusinessRoles::businessKind($tenant, $business);
         $data = $request->validate([
             'operation' => 'required|in:assign,revoke',
+            'cancel_pending' => 'sometimes|boolean',
             'stages' => 'present|array|list|max:10',
             'stages.*' => 'required|array:reviewers,required',
             'stages.*.required' => 'required|integer|min:1|max:10',
@@ -46,16 +48,29 @@ final class RoleApprovalController
             $stages[] = ['reviewers' => $ids, 'required' => (int) $stage['required']];
         }
 
-        DB::transaction(function () use ($business, $data, $stages): void {
+        $cancelled = DB::transaction(function () use ($business, $data, $stages): ?int {
+            DB::table('business_identities')->where('id', $business)->lockForUpdate()->first(['id']);
+            $this->access->requirePermission('organization_roles.approval_policy');
             DB::table('role_approval_policies')->upsert([
                 'business_id' => $business, 'operation' => $data['operation'], 'stages' => json_encode($stages, JSON_THROW_ON_ERROR),
             ], ['business_id', 'operation'], ['stages']);
-            $this->workflow->audit('organization_role.approval_policy_changed', $business, (string) Auth::id(), [
-                'operation' => $data['operation'], 'stages' => $stages,
+            $actor = (string) Auth::id();
+            $cancelled = (bool) ($data['cancel_pending'] ?? false)
+                ? $this->workflow->cancelPending($business, $data['operation'] === 'assign', $actor)
+                : null;
+            $this->workflow->audit('organization_role.approval_policy_changed', $business, $actor, [
+                'operation' => $data['operation'], 'stages' => $stages, 'cancelled_requests' => $cancelled,
             ]);
-        });
 
-        return response()->json(['stage_count' => count($stages)]);
+            return $cancelled;
+        }, attempts: 3);
+
+        $result = ['stage_count' => count($stages)];
+        if ($cancelled !== null) {
+            $result['cancelled_requests'] = $cancelled;
+        }
+
+        return response()->json($result);
     }
 
     public function index(string $tenant, string $business): JsonResponse
@@ -79,6 +94,8 @@ final class RoleApprovalController
         $actor = (string) Auth::id();
 
         return DB::transaction(function () use ($tenant, $business, $approval, $decision, $actor): JsonResponse {
+            DB::table('business_identities')->where('id', $business)->lockForUpdate()->first(['id']);
+            $this->access->requirePermission(self::PERMISSION);
             $query = DB::table('role_approval_requests')->where('id', $approval);
             $pending = $query->lockForUpdate()->first();
             abort_if($pending === null || ! DB::table('organization_business_roles')->where(['id' => $pending->role_id, 'business_id' => $business])->exists(), 404);
@@ -97,8 +114,7 @@ final class RoleApprovalController
             }
 
             DB::table('role_approval_votes')->insert(['request_id' => $approval, 'stage' => $pending->stage, 'reviewer_id' => $actor]);
-            $count = $votes->pluck('reviewer_id')->filter(fn (string $user): bool => $this->access->allows($user, self::PERMISSION))->count();
-            if ($count < $stage['required']) {
+            if ($this->authorizedVoteCount($votes) < $stage['required']) {
                 return response()->json(['status' => 'pending', 'stage' => $pending->stage]);
             }
             if (isset($stages[$pending->stage + 1])) {
@@ -108,6 +124,14 @@ final class RoleApprovalController
             }
 
             abort_unless($this->access->allows($pending->requester_id, self::PERMISSION), 403);
+            foreach (array_slice($stages, 0, $pending->stage) as $index => $earlierStage) {
+                $earlierVotes = DB::table('role_approval_votes')->where(['request_id' => $approval, 'stage' => $index]);
+                abort_if(
+                    $this->authorizedVoteCount($earlierVotes) < $earlierStage['required'],
+                    409,
+                    'An earlier approval stage no longer has enough authorized reviewers.',
+                );
+            }
             abort_unless(DB::table('customer_accounts')->where('user_id', $pending->user_id)->where('tenant_id', $tenant)->lockForUpdate()->first() !== null, 409);
             $binding = ['user_id' => $pending->user_id, 'role_id' => $pending->role_id];
             if (DB::table('organization_role_assignments')->where($binding)->exists() !== (bool) $pending->assign) {
@@ -118,5 +142,10 @@ final class RoleApprovalController
 
             return response()->json(['status' => 'approved']);
         }, attempts: 3);
+    }
+
+    private function authorizedVoteCount(Builder $votes): int
+    {
+        return $votes->pluck('reviewer_id')->filter(fn (string $user): bool => $this->access->allows($user, self::PERMISSION))->count();
     }
 }

@@ -22,6 +22,7 @@ final class PermissionCatalogue
         'organization_roles.approval_policy' => null,
         'provider_users.manage' => 'provider_users',
         'audit_trail.view' => 'audit',
+        'global_business_settings.view' => 'business_settings',
     ];
 
     public const MAPPING_BY_BUSINESS = [

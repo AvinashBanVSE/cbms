@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
 use App\Commercial\SubscriptionTerms;
+use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +32,7 @@ final class CommercialBillingController
     public function invoice(Request $request): JsonResponse
     {
         $this->access->requirePermission('commercial.manage');
-        $today = now('Asia/Kolkata')->toDateString();
+        $today = now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
         $data = $request->validate([
             'subscription_id' => 'required|uuid',
             'due_on' => 'required|date_format:Y-m-d',
@@ -142,12 +143,12 @@ final class CommercialBillingController
         $amount = (int) $invoice->amount_paise;
         $status = match (true) {
             $amount === $paid => 'Paid',
-            $invoice->due_on < now('Asia/Kolkata')->toDateString() => 'Past Due',
+            $invoice->due_on < now(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString() => 'Past Due',
             $paid > 0 => 'Partially Paid',
             default => 'Issued/Open',
         };
 
-        return [...(array) $invoice, 'currency' => 'INR', 'status' => $status, 'paid_paise' => $paid, 'outstanding_paise' => $amount - $paid];
+        return [...(array) $invoice, 'currency' => GlobalBusinessSettings::CURRENCY, 'status' => $status, 'paid_paise' => $paid, 'outstanding_paise' => $amount - $paid];
     }
 
     private function entry(string $invoice, string $payment, string $type, int $amount, ?string $reason = null): void

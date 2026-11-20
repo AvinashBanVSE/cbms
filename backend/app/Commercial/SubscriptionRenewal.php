@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Commercial;
 
+use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +19,7 @@ final class SubscriptionRenewal
 
     public function runAutomatic(): void
     {
-        $date = CarbonImmutable::today('Asia/Kolkata');
+        $date = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE);
         $today = $date->toDateString();
         $candidates = DB::table('commercial_subscriptions as term')->where(['term.renewal_mode' => 'automatic', 'term.state' => 'Active'])
             ->where('term.starts_on', '<=', $today)->where('term.ends_before', '>', $date->subDays(3660)->toDateString())
@@ -67,9 +68,9 @@ final class SubscriptionRenewal
             }
 
             $version ??= $previous->plan_version_id;
-            $start = CarbonImmutable::createFromFormat('!Y-m-d', $previous->ends_before, 'Asia/Kolkata');
+            $start = CarbonImmutable::createFromFormat('!Y-m-d', $previous->ends_before, GlobalBusinessSettings::BUSINESS_TIME_ZONE);
             $end = $start->addDays(SubscriptionTerms::duration($account->provider_id, $version));
-            $today = CarbonImmutable::today('Asia/Kolkata');
+            $today = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE);
             if ($automatic && $today->lt($start->subDays((int) $previous->renewal_lead_days))) {
                 return null;
             }

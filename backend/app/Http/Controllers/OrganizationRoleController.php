@@ -79,13 +79,15 @@ final class OrganizationRoleController
         $data = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
 
         return DB::transaction(function () use ($tenant, $business, $role, $assigned, $data): JsonResponse {
+            DB::table('business_identities')->where('id', $business)->lockForUpdate()->first(['id']);
+            $this->access->requirePermission('organization_users.manage');
             $user = DB::table('customer_accounts as account')->join('users', 'users.id', '=', 'account.user_id')
                 ->where('account.tenant_id', $tenant)->where('users.code', $data['code'])->lockForUpdate()->value('account.user_id');
             abort_if($user === null, 404);
             $result = $this->workflow->request($business, $role, $user, (string) Auth::id(), $assigned);
 
             return response()->json($result, isset($result['status']) ? 202 : 200);
-        });
+        }, attempts: 3);
     }
 
     private function audit(string $action, string $subject, array $details): void

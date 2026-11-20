@@ -17,6 +17,7 @@ use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\CredentialSettingsController;
+use App\Http\Controllers\GlobalBusinessSettingsController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\LegalIdentityController;
 use App\Http\Controllers\OrganizationAccessController;
@@ -58,6 +59,7 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('providers/{provider}/users/revoke', [ProviderUserController::class, 'revoke'])->whereUuid('provider');
     Route::post('providers/{provider}/users/recover', [AccountRecoveryController::class, 'provider'])->whereUuid('provider')
         ->middleware('throttle:10,1,provider-password-recovery');
+    Route::get('global-business-settings', GlobalBusinessSettingsController::class);
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
