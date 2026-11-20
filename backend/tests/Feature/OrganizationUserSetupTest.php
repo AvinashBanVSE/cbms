@@ -364,6 +364,27 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson("{$approval}/{$request}/decision", $vote)->assertConflict();
         $this->assertDatabaseCount('organization_role_assignments', 1);
         $this->assertDatabaseHas('portal_events', ['action' => 'organization_role.approval_decided', 'subject_id' => $request]);
+
+        $this->freezeSecond();
+        $this->actingAs($administrator);
+        $expiry = ['operation' => 'revoke', 'stages' => [['reviewers' => ['AA6111'], 'required' => 1]], 'expiry_minutes' => 1];
+        $this->postJson("{$approval}/policy", [...$expiry, 'expiry_minutes' => 0])->assertUnprocessable();
+        $this->postJson("{$approval}/policy", $expiry)->assertOk();
+        $expired = $this->postJson("{$assignment}/revoke", ['code' => 'AA6114'])->assertAccepted()->json('id');
+        $this->assertDatabaseHas('role_approval_requests', ['id' => $expired, 'expires_at' => now()->addMinute()->toDateTimeString()]);
+        $this->postJson("{$approval}/policy", [...$expiry, 'expiry_minutes' => 10])->assertOk();
+        $this->travel(1)->minute();
+        $this->getJson($approval)->assertOk()->assertJsonCount(0, 'data');
+        $this->actingAs(User::where('code', 'AA6111')->firstOrFail());
+        $this->postJson("{$approval}/{$expired}/decision", $vote)->assertConflict()
+            ->assertJsonPath('message', 'This approval request has expired.');
+        $this->assertDatabaseHas('role_approval_requests', ['id' => $expired, 'status' => 'expired']);
+        $this->assertDatabaseHas('portal_events', ['action' => 'organization_role.approval_finished', 'subject_id' => $expired]);
+        $this->assertDatabaseHas('organization_role_assignments', ['user_id' => $target, 'role_id' => $role]);
+
+        $this->actingAs($administrator);
+        $replacement = $this->postJson("{$assignment}/revoke", ['code' => 'AA6114'])->assertAccepted()->json('id');
+        $this->assertDatabaseHas('role_approval_requests', ['id' => $replacement, 'expires_at' => now()->addMinutes(10)->toDateTimeString()]);
     }
 
     public function test_account_lifecycle_revokes_sessions_and_preserves_business_records(): void

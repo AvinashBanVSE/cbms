@@ -13,6 +13,7 @@ use App\Http\Controllers\AuthenticatorController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
+use App\Http\Controllers\BusinessTimePresentationController;
 use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
@@ -60,6 +61,8 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('providers/{provider}/users/recover', [AccountRecoveryController::class, 'provider'])->whereUuid('provider')
         ->middleware('throttle:10,1,provider-password-recovery');
     Route::get('global-business-settings', GlobalBusinessSettingsController::class);
+    Route::get('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'show'])->whereUuid('business');
+    Route::post('global-business-settings/time-presentation/{business?}', [BusinessTimePresentationController::class, 'update'])->whereUuid('business');
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');

@@ -57,7 +57,7 @@ final class SubscriptionRenewal
                 return null;
             }
             if ($existing !== null) {
-                abort_unless($existing->plan_version_id === $version, 409, 'A renewal already exists for this term.');
+                abort_unless($existing->account_id === $account->id && $existing->plan_version_id === $version, 409, 'A renewal already exists for this term.');
 
                 return [$existing->id, $existing->starts_on, false];
             }
@@ -103,6 +103,7 @@ final class SubscriptionRenewal
             $this->record('commercial.subscription_renewed', $id, $actor, [
                 'previous_term_id' => $subscription, 'previous_plan_version_id' => $previous->plan_version_id,
                 'plan_version_id' => $version, 'starts_on' => $startsOn, 'reason' => $reason ?? 'Scheduled automatic renewal',
+                'tenant_id' => $tenant->id, 'provider_id' => $account->provider_id,
             ]);
             if ($automatic) {
                 SubscriptionAddOns::carryForward($subscription, $id);
@@ -118,12 +119,18 @@ final class SubscriptionRenewal
     {
         DB::transaction(function () use ($renewal, $previous, $today): void {
             $account = $this->account($renewal);
+            if ($account === null) {
+                return;
+            }
             $tenant = DB::table('customer_tenants')->where('id', $account->tenant_id)->lockForUpdate()->first();
             $organization = DB::table('business_identities')->where('id', $tenant->organization_id)->lockForUpdate()->first();
-            $prior = DB::table('commercial_subscriptions')->where('id', $previous)->lockForUpdate()->first();
-            $term = DB::table('commercial_subscriptions')->where('id', $renewal)->lockForUpdate()->first();
-            if ($tenant->provider_id !== $account->provider_id || $organization->operational_state === 'Closed'
-                || $prior->state !== 'Active' || ! in_array($term->state, ['Pending Activation', 'Grace Period'], true)
+            $terms = DB::table('commercial_subscriptions')->where('account_id', $account->id);
+            $prior = (clone $terms)->where('id', $previous)->lockForUpdate()->first();
+            $term = $terms->where('id', $renewal)->where('renewed_from_id', $previous)
+                ->where('renewal_mode', 'automatic')->lockForUpdate()->first();
+            if ($prior === null || $term === null || $tenant->provider_id !== $account->provider_id
+                || $organization->operational_state === 'Closed' || $prior->state !== 'Active'
+                || ! in_array($term->state, ['Pending Activation', 'Grace Period'], true)
                 || $term->starts_on > $today || $term->ends_before <= $today) {
                 return;
             }
@@ -143,6 +150,7 @@ final class SubscriptionRenewal
             DB::table('commercial_subscriptions')->where('id', $renewal)->update(['state' => $next]);
             $this->record('commercial.subscription_state_changed', $renewal, null, [
                 'from' => $term->state, 'to' => $next, 'reason' => 'Scheduled renewal policy',
+                'tenant_id' => $tenant->id, 'provider_id' => $account->provider_id,
             ]);
         }, attempts: 3);
     }

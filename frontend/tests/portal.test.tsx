@@ -50,11 +50,66 @@ const adminWorkspace = {
   delegations: [],
 };
 
-it("shows the Indian platform settings in the authorized workspace", async () => {
-  request.mockImplementation(async (path) => {
+it("shows the Indian platform settings and manages the clock format", async () => {
+  request.mockImplementation(async (path, body) => {
     if (path === "installation") return json({ stage: "ready" });
     if (path === "workspace-access")
       return json({ ...adminWorkspace, administration: ["business_settings"] });
+    if (path.endsWith("/locked-shop")) {
+      return json({
+        business_id: "locked-shop",
+        scope: "business",
+        effective: { clock: "24-hour", source: "organization" },
+        upstream_lock: "organization",
+        local: {
+          clock: null,
+          override_allowed: false,
+          locked: false,
+          version: 0,
+        },
+        can_manage: true,
+      });
+    }
+    if (path.endsWith("/other-organization")) {
+      return json({
+        business_id: "other-organization",
+        scope: "organization",
+        effective: { clock: "24-hour", source: "platform" },
+        upstream_lock: null,
+        local: {
+          clock: null,
+          override_allowed: true,
+          locked: false,
+          version: 1,
+        },
+        can_manage: true,
+      });
+    }
+    if (path.endsWith("/missing-business"))
+      throw new Error("Business unavailable.");
+    if (path.startsWith("global-business-settings/time-presentation")) {
+      const clock = body ? "24-hour" : "12-hour";
+      if (body)
+        expect(body).toEqual({
+          clock,
+          override_allowed: false,
+          locked: false,
+          expected_version: 1,
+        });
+      return json({
+        business_id: "platform",
+        scope: "platform",
+        effective: { clock, source: "platform" },
+        upstream_lock: null,
+        local: {
+          clock,
+          override_allowed: false,
+          locked: false,
+          version: body ? 2 : 1,
+        },
+        can_manage: true,
+      });
+    }
     if (path === "global-business-settings")
       return json({
         stable_core: {
@@ -92,7 +147,35 @@ it("shows the Indian platform settings in the authorized workspace", async () =>
     "English",
     "1 April to 31 March",
   ]);
-  expect(settings.querySelector("form")).toBeNull();
+  expect(
+    settings.querySelector('form[data-operation="save-time-presentation"]'),
+  ).toBeNull();
+  await submit('form[data-operation="load-time-presentation"]');
+  expect(settings.textContent).toContain("Effective clock: 12-hour");
+  const editor = 'form[data-operation="save-time-presentation"]';
+  document.querySelector<HTMLSelectElement>(
+    editor + ' select[name="clock"]',
+  )!.value = "24-hour";
+  await submit(editor);
+  expect(settings.textContent).toContain("Effective clock: 24-hour");
+  expect(settings.textContent).toContain("Time display settings saved.");
+  const load = 'form[data-operation="load-time-presentation"]';
+  input("business", "locked-shop");
+  await submit(load);
+  expect(settings.textContent).toContain(
+    "Inherited value locked by Organization.",
+  );
+  expect(settings.querySelector(editor)).toBeNull();
+  input("business", "other-organization");
+  await submit(load);
+  expect(
+    settings.querySelector<HTMLInputElement>('[name="override_allowed"]')
+      ?.checked,
+  ).toBe(true);
+  input("business", "missing-business");
+  await submit(load);
+  expect(settings.textContent).toContain("Business unavailable.");
+  expect(settings.querySelector(editor)).toBeNull();
 });
 
 it("reports a rejected settings request when the read grant is revoked", async () => {
@@ -1283,6 +1366,7 @@ it("registers a role and changes the selected user's assignment", async () => {
       expect(body).toEqual({
         operation: "assign",
         stages: [{ required: 2, reviewers: ["AA0011", "AA0012"] }],
+        expiry_minutes: 25,
         ...(body?.cancel_pending ? { cancel_pending: true } : {}),
       });
       if (body?.cancel_pending) {
@@ -1366,6 +1450,9 @@ it("registers a role and changes the selected user's assignment", async () => {
   expect(document.body.textContent).toContain("Enter the required count");
   document.querySelector<HTMLTextAreaElement>(policy + " textarea")!.value =
     "2: AA0011, AA0012";
+  document.querySelector<HTMLInputElement>(
+    policy + ' [name="expiry_minutes"]',
+  )!.value = "25";
   await submit(policy);
   expect(document.body.textContent).toContain(
     "Approval policy saved. Stages: 1",

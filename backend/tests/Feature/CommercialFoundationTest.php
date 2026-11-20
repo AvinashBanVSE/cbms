@@ -136,6 +136,18 @@ final class CommercialFoundationTest extends TestCase
         $this->assertSame(1, DB::table('commercial_subscriptions')->where('renewed_from_id', $subscription)->count());
 
         $this->travelTo(CarbonImmutable::parse('2032-03-29', 'Asia/Kolkata'));
+        $provider = DB::table('commercial_accounts')->where('id', $input['account_id'])->value('provider_id');
+        $otherTenant = Str::uuid7()->toString();
+        $otherOrganization = $this->business('Organization');
+        DB::table('customer_tenants')->insert(['id' => $otherTenant, 'organization_id' => $otherOrganization, 'provider_id' => $provider]);
+        $foreignAccount = $this->postJson($base.'/accounts', [
+            'tenant_id' => $otherTenant, 'provider_id' => $provider, 'billing_party' => 'Other Organization',
+        ])->assertCreated()->json('id');
+        DB::table('commercial_subscriptions')->where('id', $next->id)->update(['account_id' => $foreignAccount]);
+        $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
+        $this->assertDatabaseHas('commercial_subscriptions', ['id' => $next->id, 'state' => 'Pending Activation']);
+        $this->assertDatabaseMissing('portal_events', ['action' => 'commercial.subscription_state_changed', 'subject_id' => $next->id]);
+        DB::table('commercial_subscriptions')->where('id', $next->id)->update(['account_id' => $input['account_id']]);
         $this->artisan('commercial:renew-subscriptions')->assertSuccessful();
         $this->assertDatabaseHas('commercial_subscriptions', [
             'id' => $next->id, 'state' => 'Grace Period', 'grace_ends_before' => '2032-04-01',

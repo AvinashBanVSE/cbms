@@ -59,6 +59,7 @@ export function RoleApprovals({ base }: { base: string }) {
         await portalRequest(base + "/policy", {
           operation: String(data.get("operation")),
           stages,
+          expiry_minutes: Number(data.get("expiry_minutes")) || null,
           ...(data.has("cancel_pending") ? { cancel_pending: true } : {}),
         })
       ).json();
@@ -105,6 +106,11 @@ export function RoleApprovals({ base }: { base: string }) {
           such as 2: AB1234, CD5678. A blank policy requires no approval for new
           requests.
         </p>
+        <label>
+          Approval validity in minutes
+          <input type="number" name="expiry_minutes" min="1" max="525600" />
+        </label>
+        <p>Leave blank to give new requests no expiry.</p>
         <label>
           <input type="checkbox" name="cancel_pending" />
           Cancel pending requests for the selected operation in this business

@@ -27,6 +27,7 @@ final class RoleApprovalController
         $data = $request->validate([
             'operation' => 'required|in:assign,revoke',
             'cancel_pending' => 'sometimes|boolean',
+            'expiry_minutes' => 'sometimes|nullable|integer|between:1,525600',
             'stages' => 'present|array|list|max:10',
             'stages.*' => 'required|array:reviewers,required',
             'stages.*.required' => 'required|integer|min:1|max:10',
@@ -51,15 +52,20 @@ final class RoleApprovalController
         $cancelled = DB::transaction(function () use ($business, $data, $stages): ?int {
             DB::table('business_identities')->where('id', $business)->lockForUpdate()->first(['id']);
             $this->access->requirePermission('organization_roles.approval_policy');
+            $binding = ['business_id' => $business, 'operation' => $data['operation']];
+            $expiry = array_key_exists('expiry_minutes', $data)
+                ? $data['expiry_minutes']
+                : DB::table('role_approval_policies')->where($binding)->value('expiry_minutes');
             DB::table('role_approval_policies')->upsert([
-                'business_id' => $business, 'operation' => $data['operation'], 'stages' => json_encode($stages, JSON_THROW_ON_ERROR),
-            ], ['business_id', 'operation'], ['stages']);
+                ...$binding, 'stages' => json_encode($stages, JSON_THROW_ON_ERROR), 'expiry_minutes' => $expiry,
+            ], ['business_id', 'operation'], ['stages', 'expiry_minutes']);
             $actor = (string) Auth::id();
             $cancelled = (bool) ($data['cancel_pending'] ?? false)
                 ? $this->workflow->cancelPending($business, $data['operation'] === 'assign', $actor)
                 : null;
             $this->workflow->audit('organization_role.approval_policy_changed', $business, $actor, [
                 'operation' => $data['operation'], 'stages' => $stages, 'cancelled_requests' => $cancelled,
+                'expiry_minutes' => $expiry,
             ]);
 
             return $cancelled;
@@ -81,6 +87,7 @@ final class RoleApprovalController
             ->join('organization_business_roles as role', 'role.id', '=', 'approval.role_id')
             ->join('users as target', 'target.id', '=', 'approval.user_id')
             ->where('role.business_id', $business)->where('approval.status', 'pending')
+            ->where(fn (Builder $live) => $live->whereNull('approval.expires_at')->orWhere('approval.expires_at', '>', now()))
             ->orderBy('approval.id')->simplePaginate(30, ['approval.id', 'approval.assign', 'approval.stage', 'role.name as role', 'target.code']);
 
         return response()->json($requests)->header('Cache-Control', 'no-store');
@@ -103,6 +110,9 @@ final class RoleApprovalController
             $stages = json_decode($pending->stages, true, flags: JSON_THROW_ON_ERROR);
             $stage = $stages[$pending->stage];
             abort_unless($actor !== $pending->requester_id && in_array($actor, $stage['reviewers'], true), 403);
+            if ($this->workflow->expireIfDue($pending, $actor)) {
+                return response()->json(['message' => 'This approval request has expired.'], 409);
+            }
             $votes = DB::table('role_approval_votes')->where(['request_id' => $approval, 'stage' => $pending->stage]);
             abort_if((clone $votes)->where('reviewer_id', $actor)->exists(), 409);
             $this->workflow->audit('organization_role.approval_decided', $approval, $actor, ['stage' => $pending->stage, 'decision' => $decision]);

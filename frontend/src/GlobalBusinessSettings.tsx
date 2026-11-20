@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BusinessTimePresentation } from "./BusinessTimePresentation";
 import { portalRequest } from "./api";
 
 interface Settings {
@@ -76,6 +77,7 @@ export function GlobalBusinessSettings() {
         <dt>Financial year</dt>
         <dd>{year}</dd>
       </dl>
+      <BusinessTimePresentation timeZone={stable.time_zone} />
     </>
   );
 }
