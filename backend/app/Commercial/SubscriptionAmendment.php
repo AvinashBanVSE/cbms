@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Commercial;
 
+use App\Configuration\GlobalBusinessSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -92,7 +93,7 @@ final class SubscriptionAmendment
     /** Daily proration over the remainder of the term, reading amounts from the version records. */
     private function proration(object $current, string $planVersion): array
     {
-        $today = CarbonImmutable::today();
+        $today = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE);
         $start = CarbonImmutable::parse($current->starts_on);
         $end = CarbonImmutable::parse($current->ends_before);
         $totalDays = max(1, (int) $start->diffInDays($end));
@@ -110,7 +111,7 @@ final class SubscriptionAmendment
 
     private function effectiveAt(object $current, string $timing, string $requestedDate): string
     {
-        $today = CarbonImmutable::today()->toDateString();
+        $today = CarbonImmutable::today(GlobalBusinessSettings::BUSINESS_TIME_ZONE)->toDateString();
         if ($timing === 'next_cycle') {
             // Next-cycle changes take effect at the end of the current term.
             return CarbonImmutable::parse($current->ends_before)->startOfDay()->toISOString();

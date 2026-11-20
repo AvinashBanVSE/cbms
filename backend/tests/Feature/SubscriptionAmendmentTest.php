@@ -31,7 +31,9 @@ final class SubscriptionAmendmentTest extends TestCase
         // The change is effective now and the billing calculation reference is preserved.
         $this->assertStringStartsWith('2032-03-24', (string) $amended->json('effective_at'));
         $this->assertSame('upgrade', $amended->json('change_type'));
-        $this->assertGreaterThan(0, $amended->json('charge_paise'));
+        // On Asia/Kolkata business dates 10 of 30 days remain, so the daily upgrade proration is (20000-12000)*10/30.
+        $this->assertSame(2667, $amended->json('charge_paise'));
+        $this->assertSame(0, $amended->json('credit_paise'));
         $this->assertDatabaseHas('commercial_subscription_amendments', [
             'id' => $amendmentId, 'subscription_id' => $context['subscription'], 'amended_from_id' => $context['subscription'],
             'change_type' => 'upgrade', 'timing' => 'immediate', 'proration_basis' => 'daily',
@@ -77,7 +79,8 @@ final class SubscriptionAmendmentTest extends TestCase
         ])->assertCreated();
 
         $this->assertSame('downgrade', $amended->json('change_type'));
-        $this->assertGreaterThan(0, $amended->json('credit_paise'));
+        // On Asia/Kolkata business dates 10 of 30 days remain, so the daily downgrade credit is (12000-6000)*10/30.
+        $this->assertSame(2000, $amended->json('credit_paise'));
         $this->assertSame(0, $amended->json('charge_paise'));
     }
 
