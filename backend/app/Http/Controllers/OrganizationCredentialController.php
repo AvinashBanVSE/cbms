@@ -38,6 +38,7 @@ final class OrganizationCredentialController
 
             $token = Str::random(64);
             DB::table('organization_user_setups')->where('user_id', $setup->user_id)->update([
+                'temporary_hash' => null, 'temporary_expires_at' => null,
                 'otp_hash' => null, 'otp_expires_at' => null, 'session_digest' => hash('sha256', $token),
                 'session_expires_at' => now()->addMinutes(5),
             ]);

@@ -62,6 +62,11 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson('/api/v1/organization-setup/complete')->assertForbidden();
         $this->postJson('/api/v1/organization-setup/verify', ['code' => $code])->assertUnprocessable();
         $this->postJson('/api/v1/organization-setup/verify', $proof)->assertOk();
+        $this->postJson('/api/v1/organization-setup/verify', $proof)->assertUnprocessable();
+        $this->assertDatabaseHas('organization_user_setups', [
+            'mode' => $mode, 'temporary_hash' => null, 'temporary_expires_at' => null,
+            'otp_hash' => null, 'otp_expires_at' => null,
+        ]);
         $this->getJson('/api/v1/mapping-contexts')->assertUnauthorized();
         $this->postJson('/api/v1/organization-setup/complete', ['password' => 'short'])->assertUnprocessable();
         $this->mock(UncompromisedVerifier::class)->shouldReceive('verify')->andReturn(true);

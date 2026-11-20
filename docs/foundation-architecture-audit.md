@@ -26,6 +26,7 @@ The legal and statutory module implementation follows the separately authorized 
 - Distributor verification accepts the Shop Unique ID and its Shop-generated code in the Distributor workspace. Shop confirmation accepts the second code in the Shop workspace. The intended Distributor is still bound at issuance. Both verification stages retain permission checks, stage and expiry checks, revocation and atomic one-time use. Existing ID-based API routes retain their behavior.
 - Organization creation checks the Service Provider's active operational state inside the creation transaction. A rejected provider assignment also rolls back any owner creation attempted in that request.
 - The dashboard discovers authorized workspaces independently of service-catalogue access. An authenticated account can sign out even when it has no assignments. Each workspace API still enforces its operation's own authorization.
+- Successful Organization setup verification consumes both the temporary password and the one-time code, where issued. Replaying the same proof cannot replace the existing restricted setup session.
 
 ## Completion gate
 
