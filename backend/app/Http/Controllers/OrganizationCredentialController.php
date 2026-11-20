@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Accounts\PasswordHistory;
 use App\Validation\PermanentPassword;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -12,7 +13,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 final class OrganizationCredentialController
 {
@@ -74,8 +74,8 @@ final class OrganizationCredentialController
             $setup = DB::table($provider ? 'provider_user_setups' : 'organization_user_setups')->where('user_id', $account->user_id)
                 ->where('session_digest', hash('sha256', $session['token']))->where('session_expires_at', '>', now());
             abort_unless($setup->delete() === 1, 403);
-            if ($account->prior_password_hash !== null && Hash::check($input['password'], $account->prior_password_hash)) {
-                throw ValidationException::withMessages(['password' => 'Choose a password different from your previous password.']);
+            if ($account->prior_password_hash !== null) {
+                PasswordHistory::retire($account->user_id, $account->prior_password_hash, $input['password']);
             }
             DB::table('users')->where('id', $account->user_id)->update(['password' => Hash::make($input['password'])]);
             if ($account->purpose === 'setup') {

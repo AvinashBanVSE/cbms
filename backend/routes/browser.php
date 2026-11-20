@@ -13,6 +13,7 @@ use App\Http\Controllers\BusinessStructureController;
 use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
+use App\Http\Controllers\CredentialSettingsController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\OrganizationAccessController;
 use App\Http\Controllers\OrganizationAccountLifecycleController;
@@ -34,6 +35,8 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
     Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::get('credential-settings', [CredentialSettingsController::class, 'show']);
+    Route::post('credential-settings', [CredentialSettingsController::class, 'update']);
     Route::get('provider-organizations', [ProviderUserController::class, 'organizations']);
     Route::post('providers/{provider}/users', [ProviderUserController::class, 'store'])->whereUuid('provider');
     Route::post('providers/{provider}/users/reissue', [ProviderUserController::class, 'reissue'])->whereUuid('provider')

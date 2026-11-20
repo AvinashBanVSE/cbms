@@ -744,6 +744,10 @@ it("configures account setup and provisions an authorized Organization user", as
         });
       case "providers/portal/credential-default":
         return json({ mode: "otp" });
+      case "credential-settings":
+        if (!body) return json({ password_history_count: 5 });
+        expect(body).toEqual({ password_history_count: 8 });
+        return json(body);
       case "tenants/tenant/organization-users":
         return json({ user_code: "AB1234", delivery: "failed" });
       case "tenants/tenant/organization-users/reissue":
@@ -758,6 +762,20 @@ it("configures account setup and provisions an authorized Organization user", as
   });
   await render();
   await click("Organization users");
+  await click("Load password history policy");
+  const history = document.querySelector<HTMLInputElement>(
+    '[name="password_history_count"]',
+  )!;
+  expect(history.value).toBe("5");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(history, "8");
+    history.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await submit('form[data-operation="password-history-policy"]');
+  expect(document.body.textContent).toContain("Password history policy saved");
   const policy = "form[data-operation=policy]";
   const resend = "form[data-operation=reissue]";
   const create = "form:not([data-operation])";

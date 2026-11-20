@@ -424,6 +424,7 @@ final class OrganizationUserSetupTest extends TestCase
 
     public function test_scoped_recovery_invalidates_sessions_and_requires_a_new_password(): void
     {
+        config(['portal.password_history_count' => 5]);
         [$tenant, , $administrator] = $this->fixture();
         [$otherTenant] = $this->fixtureForOtherOrganization();
         $transport = new ArrayTransport;
@@ -475,8 +476,26 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson('/api/v1/organization-setup/verify', $proof)->assertUnprocessable();
         $this->mock(UncompromisedVerifier::class)->shouldReceive('verify')->andReturn(true);
         $this->postJson('/api/v1/organization-setup/complete', ['password' => $old, 'password_confirmation' => $old])->assertUnprocessable();
+        for ($sequence = 1; $sequence <= 10; $sequence++) {
+            DB::table('user_password_history')->insert([
+                'user_id' => $employee, 'sequence' => $sequence,
+                'password_hash' => Hash::make("previous-test-only-password-{$sequence}"),
+            ]);
+        }
+        $recent = 'previous-test-only-password-7';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $recent, 'password_confirmation' => $recent])
+            ->assertUnprocessable()->assertJsonValidationErrors('password');
+        config(['portal.password_history_count' => 10]);
+        $older = 'previous-test-only-password-2';
+        $this->postJson('/api/v1/organization-setup/complete', ['password' => $older, 'password_confirmation' => $older])
+            ->assertUnprocessable()->assertJsonValidationErrors('password');
         $replacement = 'new-test-only-recovered-password';
+        DB::table('user_password_history')->insert(['user_id' => $manager, 'sequence' => 1, 'password_hash' => Hash::make($replacement)]);
         $this->postJson('/api/v1/organization-setup/complete', ['password' => $replacement, 'password_confirmation' => $replacement])->assertOk();
+        $history = DB::table('user_password_history')->where('user_id', $employee);
+        $this->assertSame(10, $history->count());
+        $this->assertDatabaseMissing('user_password_history', ['user_id' => $employee, 'sequence' => 1]);
+        $this->assertTrue(Hash::check($old, $history->where('sequence', 11)->value('password_hash')));
         $this->postJson('/api/v1/login', [...$credentials, 'password' => $replacement])->assertNoContent();
         $this->assertDatabaseHas('portal_events', ['action' => 'account.password_recovery_completed', 'subject_id' => $employee]);
         $this->assertDatabaseHas('portal_events', ['action' => 'account.password_recovery_started', 'subject_id' => $employee, 'actor_id' => $manager]);
@@ -488,6 +507,24 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson($route, $request)->assertForbidden();
         $this->getJson('/api/v1/workspace-access')->assertJsonMissingPath('organization_recovery')
             ->assertJsonPath('organization_onboarding.tenant_id', $tenant);
+    }
+
+    public function test_password_history_policy_is_audited_and_controlled_by_main_portal(): void
+    {
+        [, , $administrator] = $this->fixture();
+        $path = '/api/v1/credential-settings';
+        $this->getJson($path)->assertUnauthorized();
+        $this->actingAs($administrator);
+        config(['portal.password_history_count' => 3]);
+        $this->getJson($path)->assertOk()->assertExactJson(['password_history_count' => 5]);
+        $this->postJson($path, ['password_history_count' => 11])->assertUnprocessable();
+        $this->postJson($path, ['password_history_count' => 8])->assertOk()->assertExactJson(['password_history_count' => 8]);
+        $this->postJson($path, ['password_history_count' => 8])->assertOk();
+        $this->assertSame(1, DB::table('portal_events')->where('action', 'credential_policy.password_history_changed')->count());
+        config(['portal.password_history_count' => 10]);
+        $this->getJson($path)->assertOk()->assertExactJson(['password_history_count' => 8]);
+        DB::table('portal_grants')->where('user_id', $administrator->id)->delete();
+        $this->postJson($path, ['password_history_count' => 5])->assertForbidden();
     }
 
     private function fixtureForOtherOrganization(): array

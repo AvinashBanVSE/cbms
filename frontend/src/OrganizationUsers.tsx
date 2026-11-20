@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { OrganizationDelegations } from "./OrganizationDelegations";
 import { AccountRecovery } from "./AccountRecovery";
+import { CredentialSettings } from "./CredentialSettings";
 import { OrganizationAccountLifecycle } from "./OrganizationAccountLifecycle";
 import { OrganizationRoles } from "./OrganizationRoles";
 import { portalRequest } from "./api";
@@ -401,6 +402,7 @@ export function OrganizationUsers({ tenantId }: { tenantId?: string } = {}) {
             </form>
           </details>
           <AccountRecovery />
+          <CredentialSettings />
           <OrganizationAccess />
           <OrganizationAccountLifecycle />
           <OrganizationDelegations />
