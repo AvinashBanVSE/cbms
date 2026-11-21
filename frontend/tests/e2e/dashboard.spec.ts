@@ -1,6 +1,30 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('CBMS overview dashboard', () => {
+  test('completes portal setup and Portal Owner creation', async ({ page }) => {
+    await page.route('**/api/v1/csrf', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'setup-token' }) })
+    })
+    await page.route('**/api/v1/installation/setup', async route => {
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ stage: 'owner_required' }) })
+    })
+    await page.route('**/api/v1/installation/owner', async route => {
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ stage: 'ready', user_code: 'AB1234' }) })
+    })
+
+    await page.goto('/pages/setup')
+    await page.getByLabel('Deployment setup code*').fill('a'.repeat(32))
+    await page.getByLabel('Legal name*').fill('CBMS Holdings')
+    await page.getByLabel('Professional name*').fill('CBMS')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('Create the Portal Owner', { exact: true })).toBeVisible()
+    await page.getByLabel('Owner name*').fill('Portal Owner')
+    await page.getByLabel('Email address*').fill('owner@example.com')
+    await page.getByLabel('Permanent password*').fill('A-strong-password-123')
+    await page.getByRole('button', { name: 'Create Portal Owner' }).click()
+    await expect(page.getByText('AB1234')).toBeVisible()
+  })
+
   test('shows authorized installation and workspace data from the API', async ({ page }) => {
     await page.route('**/api/v1/installation', async route => {
       await route.fulfill({

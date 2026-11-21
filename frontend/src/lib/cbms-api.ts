@@ -11,7 +11,7 @@ type RequestBody = Record<string, unknown>
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api/v1'
 
-export async function cbmsRequest(path: string, body?: RequestBody): Promise<Response> {
+export async function cbmsRequest(path: string, body?: RequestBody, setupCode?: string): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' }
 
   if (body) {
@@ -27,6 +27,8 @@ export async function cbmsRequest(path: string, body?: RequestBody): Promise<Res
     headers['Content-Type'] = 'application/json'
     headers['X-CSRF-TOKEN'] = payload.token
   }
+
+  if (setupCode) headers['X-Setup-Code'] = setupCode
 
   const response = await fetch(`${apiBase}/${path}`, {
     method: body ? 'POST' : 'GET',
