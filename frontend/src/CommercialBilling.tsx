@@ -19,6 +19,13 @@ interface LedgerEntry {
   reason: string | null;
 }
 
+interface ReminderEntry {
+  id: string;
+  days_before: number;
+  scheduled_on: string;
+  outstanding_paise: number;
+}
+
 interface Page<T> {
   data: T[];
   next_page_url: string | null;
@@ -41,6 +48,7 @@ export function CommercialBilling() {
   const [selected, setSelected] = useState<{
     invoice: Invoice;
     history: Page<LedgerEntry>;
+    reminders: ReminderEntry[];
     presentation?: { negative_amount: string | null };
   }>();
   const [historyPage, setHistoryPage] = useState(1);
@@ -67,16 +75,21 @@ export function CommercialBilling() {
   }
 
   async function load(id: string, number = 1) {
-    setSelected(
-      await (
-        await portalRequest(
-          "commercial/invoices/" +
-            encodeURIComponent(id) +
-            "/payments?page=" +
-            number,
-        )
+    const invoicePath =
+      "commercial/invoices/" + encodeURIComponent(id);
+    const [detail, reminders] = await Promise.all([
+      (
+        await portalRequest(invoicePath + "/payments?page=" + number)
       ).json(),
-    );
+      (await portalRequest(invoicePath + "/reminders")).json(),
+    ]);
+    setSelected({
+      invoice: (detail as { invoice: Invoice }).invoice,
+      history: (detail as { history: Page<LedgerEntry> }).history,
+      presentation: (detail as { presentation?: { negative_amount: string | null } })
+        .presentation,
+      reminders: (reminders as { history: ReminderEntry[] }).history,
+    });
     setHistoryPage(number);
   }
 
@@ -107,6 +120,14 @@ export function CommercialBilling() {
             { reason: fields.reason },
           );
           setNotice("Payment reversal recorded.");
+        } else if (operation === "billing-reminder") {
+          await portalRequest(
+            "commercial/invoices/" +
+              encodeURIComponent(invoice) +
+              "/reminders",
+            {},
+          );
+          setNotice("Billing reminder recorded.");
         } else {
           await portalRequest(path, fields);
           setNotice("Payment recorded.");
@@ -192,6 +213,9 @@ export function CommercialBilling() {
             </label>
             <button disabled={busy}>Record reversal</button>
           </form>
+          <form data-operation="billing-reminder" onSubmit={submit}>
+            <button disabled={busy}>Record billing reminder</button>
+          </form>
           <ul aria-label="Payment ledger">
             {selected.history.data.map((entry) => (
               <li key={entry.id}>
@@ -205,6 +229,20 @@ export function CommercialBilling() {
               </li>
             ))}
           </ul>
+          {selected.reminders.length > 0 && (
+            <>
+              <h4>Reminder history</h4>
+              <ul aria-label="Reminder history">
+                {selected.reminders.map((reminder) => (
+                  <li key={reminder.id}>
+                    {reminder.scheduled_on} · {reminder.days_before} day
+                    {reminder.days_before === 1 ? "" : "s"} before due ·{" "}
+                    {money(reminder.outstanding_paise)} outstanding
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {historyPage > 1 && (
             <button
               disabled={busy}

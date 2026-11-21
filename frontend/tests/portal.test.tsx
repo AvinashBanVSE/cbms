@@ -2265,6 +2265,8 @@ it("issues a billing record and records payments and reversals", async () => {
           next_page_url: url.endsWith("1") ? "next" : null,
         },
       });
+    if (url === "commercial/invoices/invoice1/reminders")
+      return json({ history: results ? [{ id: "reminder1", days_before: 3, scheduled_on: "2032-02-26", outstanding_paise: 12345 }] : [] });
     if (url === "commercial/invoices/invoice1/payments") {
       expect(body).toEqual({ amount_paise: "2000", receipt_reference: "R-01" });
       paid = 2000;
@@ -2307,6 +2309,7 @@ it("issues a billing record and records payments and reversals", async () => {
   set(reverse, "reason", "Correction");
   await submit(reverse);
   expect(document.body.textContent).toContain("Payment reversal recorded");
+  expect(document.body.textContent).toContain("Reminder history");
   expect(document.body.textContent).toContain("(₹20.00)");
   expect(document.body.textContent).toContain("Reversal reason: Correction");
   set(reverse, "payment", "missing");

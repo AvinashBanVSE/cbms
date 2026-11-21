@@ -169,6 +169,8 @@ final class CommercialController
             'renewal_lead_days' => 'required_if:renewal_mode,automatic|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
             'renewal_grace_days' => 'required_with:renewal_grace_policy|missing_unless:renewal_mode,automatic|integer|min:1|max:3660',
             'renewal_grace_policy' => 'required_with:renewal_grace_days|missing_unless:renewal_mode,automatic|in:retain_features,block_features',
+            'billing_reminder_policy' => 'sometimes|required|in:enabled,disabled',
+            'billing_reminder_days' => 'required_with:billing_reminder_policy|integer|min:1|max:30',
             'trial_reason' => 'sometimes|required|string|max:500',
             'coverage_mode' => 'required|in:organization,selected,network,future_network',
             'business_ids' => 'required_if:coverage_mode,selected|prohibited_unless:coverage_mode,selected|array|list|max:1000',
@@ -219,6 +221,8 @@ final class CommercialController
                 'state' => $state, 'renewal_mode' => $data['renewal_mode'], 'coverage_mode' => $mode,
                 'renewal_lead_days' => $leadDays,
                 'renewal_grace_days' => $graceDays, 'renewal_grace_policy' => $data['renewal_grace_policy'] ?? null,
+                'billing_reminder_policy' => $data['billing_reminder_policy'] ?? null,
+                'billing_reminder_days' => $data['billing_reminder_days'] ?? null,
                 'starts_on' => $start->toDateString(), 'ends_before' => $start->addDays($termDays)->toDateString(),
             ]);
             SubscriptionCoverage::assign($id, $coverage);

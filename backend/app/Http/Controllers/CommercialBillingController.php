@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
+use App\Commercial\BillingReminder;
 use App\Commercial\SubscriptionTerms;
 use App\Configuration\BusinessTimePresentation;
 use App\Configuration\GlobalBusinessSettings;
@@ -134,6 +135,27 @@ final class CommercialBillingController
 
             return response()->json($this->balance($row, $this->paid($invoice)));
         }, attempts: 3);
+    }
+
+    /** Reminder history for an invoice. */
+    public function reminders(string $invoice, BillingReminder $reminder): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $row = $this->findInvoice($invoice, false);
+        $history = collect($reminder->history($invoice));
+
+        return response()->json(['invoice' => $this->balance($row, $this->paid($invoice)), 'history' => $history])
+            ->header('Cache-Control', 'no-store');
+    }
+
+    /** Record a governed billing reminder for the invoice if its policy and lead time allow. */
+    public function sendReminder(Request $request, string $invoice, BillingReminder $reminder): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $result = $reminder->record($invoice, Auth::id() ?? throw new \RuntimeException('No authenticated user.'));
+        $status = $result['duplicate'] ? 200 : 201;
+
+        return response()->json($result, $status)->header('Cache-Control', 'no-store');
     }
 
     private function findInvoice(string $invoice, bool $lock): object
