@@ -21,6 +21,7 @@ const LoginForm = () => {
   const [isVisible, setIsVisible] = useState(false)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [authenticatorRequired, setAuthenticatorRequired] = useState(false)
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -31,13 +32,24 @@ const LoginForm = () => {
     setNotice('')
 
     try {
-      const response = await cbmsRequest('login', {
+      const body: Record<string, string> = {
         code: String(values.code).trim().toUpperCase(),
         email: String(values.email).trim(),
         password: String(values.password)
-      })
+      }
 
-      setNotice(response.status === 202 ? 'Additional authenticator verification is required.' : 'Signed in successfully.')
+      if (authenticatorRequired) body.authenticator_code = String(values.authenticator_code ?? '')
+
+      const response = await cbmsRequest('login', body)
+
+      if (response.status === 202) {
+        setAuthenticatorRequired(true)
+        setNotice('Enter the six-digit code from your authenticator application.')
+
+        return
+      }
+
+      setNotice('Signed in successfully.')
       if (response.status === 200) window.location.assign('/dashboard')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Sign-in failed. Please retry.')
@@ -83,6 +95,23 @@ const LoginForm = () => {
             </InputGroupAddon>
           </InputGroup>
         </Field>
+        {authenticatorRequired && (
+          <Field className='gap-2'>
+            <FieldLabel htmlFor='authenticatorCode' className='leading-5'>
+              Authenticator code*
+            </FieldLabel>
+            <Input
+              name='authenticator_code'
+              id='authenticatorCode'
+              inputMode='numeric'
+              pattern='[0-9]{6}'
+              maxLength={6}
+              placeholder='000000'
+              autoComplete='one-time-code'
+              required
+            />
+          </Field>
+        )}
         {/* Remember Me and Forgot Password */}
         <div className='flex items-center justify-between gap-y-2'>
           <Field orientation='horizontal' className='flex items-center gap-2'>
