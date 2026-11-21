@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2Icon } from 'lucide-react'
 
 import { CbmsApiError, cbmsRequest } from '@/lib/cbms-api'
+import { navigateToPage } from '@/lib/client-navigation'
 
 const AuthenticatedLayout = ({ children }: Readonly<{ children: ReactNode }>) => {
   const router = useRouter()
@@ -23,12 +24,12 @@ const AuthenticatedLayout = ({ children }: Readonly<{ children: ReactNode }>) =>
         if (!active) return
 
         if (error instanceof CbmsApiError && error.status === 401) {
-          router.replace('/login')
+          void navigateToPage(router, 'login', true)
 
           return
         }
 
-        router.replace('/error')
+        void navigateToPage(router, 'error', true)
       })
 
     return () => {

@@ -12,7 +12,7 @@ export default defineConfig({
   },
   webServer: {
     command: './node_modules/.bin/next dev --hostname 127.0.0.1 --port 3100',
-    url: 'http://127.0.0.1:3100',
+    url: 'http://127.0.0.1:3100/navigation',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
   },

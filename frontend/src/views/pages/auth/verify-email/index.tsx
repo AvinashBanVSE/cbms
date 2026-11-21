@@ -1,5 +1,5 @@
 // Next Imports
-import Link from 'next/link'
+import Link from '@/components/navigation/OpaqueLink'
 
 // Component Import
 import Logo from '@/components/shared/Logo'

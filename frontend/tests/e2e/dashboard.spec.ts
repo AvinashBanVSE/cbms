@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+const opaqueUrl = /\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 test.describe('CBMS overview dashboard', () => {
   test('completes portal setup and Portal Owner creation', async ({ page }) => {
     await page.route('**/api/v1/csrf', async route => {
@@ -13,6 +15,7 @@ test.describe('CBMS overview dashboard', () => {
     })
 
     await page.goto('/setup')
+    await expect(page).toHaveURL(opaqueUrl)
     await page.getByLabel('Deployment setup code*').fill('a'.repeat(32))
     await page.getByLabel('Legal name*').fill('CBMS Holdings')
     await page.getByLabel('Professional name*').fill('CBMS')
@@ -47,6 +50,7 @@ test.describe('CBMS overview dashboard', () => {
 
     await page.goto('/dashboard')
 
+    await expect(page).toHaveURL(opaqueUrl)
     await expect(page.getByRole('heading', { name: 'System overview' })).toBeVisible()
     await expect(page.getByText('Installation stage: ready')).toBeVisible()
     await expect(page.getByText(/Authorized administration areas: 2/)).toBeVisible()
@@ -62,11 +66,12 @@ test.describe('CBMS overview dashboard', () => {
     })
     await page.route('**/api/v1/login', async route => {
       attempts += 1
-      await route.fulfill({
-        status: attempts === 1 ? 202 : 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ stage: attempts === 1 ? 'authenticator_required' : 'authenticated' })
-      })
+
+      if (attempts === 1) {
+        await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ stage: 'authenticator_required' }) })
+      } else {
+        await route.fulfill({ status: 204 })
+      }
     })
     await page.route('**/api/v1/installation', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ stage: 'ready' }) })
@@ -83,7 +88,8 @@ test.describe('CBMS overview dashboard', () => {
     await expect(page.getByLabel('Authenticator code*')).toBeVisible()
     await page.getByLabel('Authenticator code*').fill('123456')
     await page.getByRole('button', { name: 'Sign in to CBMS' }).click()
-    await expect(page).toHaveURL(/\/dashboard$/)
+    await expect(page).toHaveURL(opaqueUrl)
+    await expect(page.getByRole('heading', { name: 'System overview' })).toBeVisible()
   })
 
   test('redirects unauthenticated users to sign in', async ({ page }) => {
@@ -92,6 +98,27 @@ test.describe('CBMS overview dashboard', () => {
     })
 
     await page.goto('/dashboard')
-    await expect(page).toHaveURL(/\/login$/)
+    await expect(page).toHaveURL(opaqueUrl)
+    await expect(page.getByLabel('User Code*')).toBeVisible()
+  })
+
+  test('resolves refreshes and sends invalid opaque IDs to sign in', async ({ page }) => {
+    await page.route('**/api/v1/installation', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ stage: 'ready' }) })
+    })
+    await page.route('**/api/v1/workspace-access', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ administration: [], mapping_contexts: [], delegations: [] }) })
+    })
+
+    await page.goto('/dashboard')
+    const issuedUrl = page.url()
+
+    await page.reload()
+    await expect(page).toHaveURL(issuedUrl)
+    await expect(page.getByRole('heading', { name: 'System overview' })).toBeVisible()
+
+    await page.goto('/01900000-0000-7000-8000-000000000000')
+    await expect(page).toHaveURL(opaqueUrl)
+    await expect(page.getByLabel('User Code*')).toBeVisible()
   })
 })

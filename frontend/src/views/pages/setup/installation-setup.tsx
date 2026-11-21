@@ -2,13 +2,12 @@
 
 import { useState } from 'react'
 
-import Link from 'next/link'
-
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { cbmsRequest } from '@/lib/cbms-api'
+import OpaqueLink from '@/components/navigation/OpaqueLink'
 
 type SetupStage = 'setup' | 'owner' | 'complete'
 
@@ -96,7 +95,7 @@ const InstallationSetup = () => {
               </FieldGroup>
             </form>
           )}
-          {stage === 'complete' && <div className='space-y-4'><p>Your Portal Owner User Code is:</p><p className='bg-muted rounded-md p-4 text-center text-2xl font-semibold tracking-widest'>{userCode}</p><Link href='/login' className='bg-primary text-primary-foreground inline-flex h-10 w-full items-center justify-center rounded-md px-4 text-sm font-medium'>Go to sign in</Link></div>}
+          {stage === 'complete' && <div className='space-y-4'><p>Your Portal Owner User Code is:</p><p className='bg-muted rounded-md p-4 text-center text-2xl font-semibold tracking-widest'>{userCode}</p><OpaqueLink href='/login' className='bg-primary text-primary-foreground inline-flex h-10 w-full items-center justify-center rounded-md px-4 text-sm font-medium'>Go to sign in</OpaqueLink></div>}
           {notice && <p role='alert' className='text-destructive mt-4 text-sm'>{notice}</p>}
         </CardContent>
       </Card>

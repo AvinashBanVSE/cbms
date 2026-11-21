@@ -1,8 +1,9 @@
 // Next Imports
-import Link from 'next/link'
+import { ChevronLeftIcon } from 'lucide-react'
+
+import Link from '@/components/navigation/OpaqueLink'
 
 // Third-party Imports
-import { ChevronLeftIcon } from 'lucide-react'
 
 // Component Import
 import Logo from '@/components/shared/Logo'

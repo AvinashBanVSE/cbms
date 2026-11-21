@@ -14,6 +14,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { cbmsRequest } from '@/lib/cbms-api'
+import { assignPage } from '@/lib/client-navigation'
 
 const LoginForm = () => {
   const [isVisible, setIsVisible] = useState(false)
@@ -48,7 +49,7 @@ const LoginForm = () => {
       }
 
       setNotice('Signed in successfully.')
-      if (response.ok) window.location.assign('/dashboard')
+      if (response.ok) await assignPage('dashboard')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Sign-in failed. Please retry.')
     } finally {

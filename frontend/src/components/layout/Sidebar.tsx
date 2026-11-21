@@ -6,7 +6,6 @@ import { type ComponentType } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 
 // Next Imports
-import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 
 // Third-party Imports
@@ -18,6 +17,7 @@ import type { MenuGroupSubItem, MenuItem, MenuLeafSubItem, MenuSubItem, NavItem 
 
 // Component Imports
 import LogoSvg from '@/assets/svg/logo'
+import Link from '@/components/navigation/OpaqueLink'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   DropdownMenu,

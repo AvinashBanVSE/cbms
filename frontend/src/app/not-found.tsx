@@ -1,5 +1,5 @@
 // React Imports
-import Link from 'next/link'
+import Link from '@/components/navigation/OpaqueLink'
 
 // Component Imports
 import { Button } from '@/components/ui/button'

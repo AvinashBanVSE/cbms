@@ -1,8 +1,9 @@
 // Next Imports
-import Link from 'next/link'
+import { LogInIcon } from 'lucide-react'
+
+import Link from '@/components/navigation/OpaqueLink'
 
 // Third-party Imports
-import { LogInIcon } from 'lucide-react'
 
 // Component Imports
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'

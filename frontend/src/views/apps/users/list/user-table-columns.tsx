@@ -4,7 +4,6 @@
 import type { ReactNode } from 'react'
 
 // Next Imports
-import Link from 'next/link'
 
 // Third-party Imports
 import type { ColumnDef } from '@tanstack/react-table'
@@ -22,6 +21,8 @@ import {
   UserRoundIcon,
   UserXIcon
 } from 'lucide-react'
+
+import Link from '@/components/navigation/OpaqueLink'
 
 // Type Imports
 import type { AppUser, UserBilling, UserRole, UserStatus } from '@/types/apps/user-types'
