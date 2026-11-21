@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Mapping\MappingGate;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 final class BusinessMappingTest extends TestCase
@@ -89,6 +91,67 @@ final class BusinessMappingTest extends TestCase
         $this->getJson("/api/v1/businesses/{$shop}/mappings/".Str::uuid7().'/history')->assertNotFound();
         $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'mapping.history_viewed', 'actor_id' => $shopUser->id]);
         $this->assertDatabaseCount('distributor_shop_mapping_history', 4);
+    }
+
+    /** §12.6 / §4.1: a legal mapping confers zero access to unlisted data — deny-by-default. */
+    public function test_operation_gate_denies_by_default_and_exposes_only_authorized(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1020', ['mapping.initiate', 'mapping.history.view']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1021', ['mapping.verify']);
+        $id = Str::uuid7()->toString();
+        DB::table('distributor_shop_mappings')->insert([
+            'id' => $id, 'shop_id' => $shop, 'distributor_id' => $distributor,
+            'mapping_type' => 'distributor_shop', 'state' => 'Active', 'code_digest' => null,
+            'expires_at' => null, 'lifecycle_version' => 0,
+        ]);
+
+        $this->actingAs($shopUser);
+        $operations = "/api/v1/businesses/{$shop}/mappings/{$id}/operations";
+        // Empty Main Portal allowlist: no verbs, no shared fields, no cross-context leak.
+        $this->getJson($operations)->assertOk()
+            ->assertJsonPath('mapping_type', 'distributor_shop')
+            ->assertJsonPath('mapping.allowed_transactions', [])
+            ->assertJsonPath('mapping.shared_data_fields', []);
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $id, 'action' => 'mapping.operations_viewed', 'actor_id' => $shopUser->id]);
+
+        // Wrong endpoint (the other party) and wrong mapping are refused.
+        $this->getJson("/api/v1/businesses/{$distributor}/mappings/{$id}/operations")->assertForbidden();
+        $this->getJson("/api/v1/businesses/{$shop}/mappings/".Str::uuid7().'/operations')->assertNotFound();
+
+        // The gate itself: an unlisted transaction is refused.
+        $gate = app()->make(MappingGate::class);
+        $this->assertThrows(fn () => $gate->authorize($id, 'stock.adjust'), HttpException::class);
+    }
+
+    /** §12.6: once authorized, the gate permits exactly the listed verb and listed fields. */
+    public function test_operation_gate_authorizes_listed_transaction_and_fields(): void
+    {
+        config()->set('mapping_types.distributor_shop.allowed_transactions', [
+            'stock.visibility' => ['fields' => ['sku', 'quantity']],
+        ]);
+        config()->set('mapping_types.distributor_shop.shared_data_fields', ['sku', 'quantity']);
+
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1022', ['mapping.initiate', 'mapping.history.view']);
+        [$distributor] = $this->endpoint('Distributor', 'AA1023', ['mapping.verify']);
+        $id = Str::uuid7()->toString();
+        DB::table('distributor_shop_mappings')->insert([
+            'id' => $id, 'shop_id' => $shop, 'distributor_id' => $distributor,
+            'mapping_type' => 'distributor_shop', 'state' => 'Active', 'code_digest' => null,
+            'expires_at' => null, 'lifecycle_version' => 0,
+        ]);
+
+        $gate = app()->make(MappingGate::class);
+        $gate->authorize($id, 'stock.visibility', ['sku', 'quantity']);
+        $gate->authorizeFields($id, ['sku']);
+
+        $catalogue = $gate->catalogue($id);
+        $this->assertSame(['sku', 'quantity'], $catalogue['allowed_transactions']['stock.visibility']['fields']);
+        $this->assertSame(['sku', 'quantity'], $catalogue['shared_data_fields']);
+
+        // A field outside the authorized list is refused even for an authorized verb.
+        $this->assertThrows(fn () => $gate->authorize($id, 'stock.visibility', ['sku', 'cost_price']), HttpException::class);
+        // An entirely unlisted transaction is refused even with governance entries present.
+        $this->assertThrows(fn () => $gate->authorize($id, 'billing.charge'), HttpException::class);
     }
 
     public function test_expiry_and_revocation_block_verification(): void

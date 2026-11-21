@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Authorization\CustomerBusinessAccess;
+use App\Mapping\MappingGate;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,7 @@ use Illuminate\Support\Str;
 
 final class BusinessMappingController
 {
-    public function __construct(private readonly CustomerBusinessAccess $access) {}
+    public function __construct(private readonly CustomerBusinessAccess $access, private readonly MappingGate $gate) {}
 
     public function initiate(Request $request, string $shop): JsonResponse
     {
@@ -123,6 +124,34 @@ final class BusinessMappingController
             ...$records->toArray(),
             'mapping_type' => ['code' => $type, ...config('mapping_types')[$type]],
         ])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * The authorized mapped-operation catalogue for one mapping, as either participant may
+     * view it. This is the §12.6 surface of the operation gate: only verbs and data fields
+     * expressly authorized by Main Portal governance appear here, and an empty allowlist
+     * authorizes nothing — a legal mapping confers zero access to unlisted data, the other
+     * party's Parent Organization, or administration.
+     */
+    public function operations(string $business, string $mapping): JsonResponse
+    {
+        abort_unless(Auth::check(), 401);
+        $kind = DB::table('business_identities')->where('id', $business)->value('kind');
+        abort_unless(in_array($kind, ['Shop', 'Distributor'], true), 403);
+        $actor = $this->access->requirePermission($business, $kind, 'mapping.history.view');
+        $endpoint = $kind === 'Shop' ? 'shop_id' : 'distributor_id';
+        abort_unless(DB::table('distributor_shop_mappings')->where('id', $mapping)
+            ->where($endpoint, $business)->exists(), 404);
+        $catalogue = $this->gate->catalogue($mapping);
+        $type = DB::table('distributor_shop_mappings')->where('id', $mapping)->value('mapping_type');
+        DB::table('portal_events')->insert([
+            'id' => Str::uuid7()->toString(), 'actor_id' => $actor, 'subject_id' => $mapping,
+            'action' => 'mapping.operations_viewed', 'recorded_at' => now(),
+            'details' => json_encode(['business_id' => $business], JSON_THROW_ON_ERROR),
+        ]);
+
+        return response()->json(['id' => $mapping, 'mapping_type' => $type,
+            'mapping' => $catalogue])->header('Cache-Control', 'no-store');
     }
 
     private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): string

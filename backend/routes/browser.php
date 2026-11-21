@@ -212,6 +212,8 @@ Route::prefix('api/v1')->group(function (): void {
         ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/mappings/{mapping}/history', [BusinessMappingController::class, 'history'])
         ->whereUuid(['business', 'mapping']);
+    Route::get('businesses/{business}/mappings/{mapping}/operations', [BusinessMappingController::class, 'operations'])
+        ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle/closure-policy', [BusinessLifecycleController::class, 'closurePolicy'])->whereUuid('business');

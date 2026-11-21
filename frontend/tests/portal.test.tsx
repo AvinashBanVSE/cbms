@@ -1201,6 +1201,8 @@ it("loads the customer mapping workspace and sends each action to its assigned b
     if (path.endsWith("/verify"))
       return json({ id: "m1", code: "distributor-code" });
     if (path.endsWith("/confirm")) return json({ state: "Active" });
+    if (path === "businesses/shop/mappings/m1/operations")
+      return json({ id: "m1", mapping_type: "distributor_shop", mapping: { allowed_transactions: {}, shared_data_fields: [] } });
     if (path === "businesses/shop/mappings/m1/history?page=1")
       return json({
         mapping_type: { code: "distributor_shop", name: "Distributor–Shop" },
@@ -1267,6 +1269,12 @@ it("loads the customer mapping workspace and sends each action to its assigned b
     document.querySelector('[aria-label="Mapping History"]')?.textContent,
   ).toContain("activated");
   expect(document.body.textContent).toContain("Mapping type: Distributor–Shop");
+  expect(document.body.textContent).toContain(
+    "No transactions or data fields are authorized through this mapping type",
+  );
+  expect(document.body.textContent).toContain(
+    "A mapping confers no access to unlisted data",
+  );
   await click("Next history page");
   expect(document.body.textContent).toContain("No history on this page.");
   await click("Previous history page");

@@ -23,6 +23,11 @@ interface MappingHistory {
   next_page_url: string | null;
 }
 
+interface MappingOperations {
+  allowed_transactions: Record<string, { fields: string[] }>;
+  shared_data_fields: string[];
+}
+
 export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
   const [feedback, setFeedback] = useState("");
   const [selection, setSelection] = useState(0);
@@ -32,6 +37,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
     number: number;
     page: MappingHistory;
   }>();
+  const [operations, setOperations] = useState<MappingOperations>();
   const selected = contexts[selection];
   const action = selected.action;
   const creating = action === "mapping.initiate";
@@ -43,10 +49,14 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
     setBusy(true);
     setFeedback("");
     try {
-      const page: MappingHistory = await (
-        await portalRequest(path + "?page=" + number)
-      ).json();
+      const [page, catalogue] = await Promise.all([
+        (await portalRequest(path + "?page=" + number)).json() as Promise<MappingHistory>,
+        (await portalRequest(
+          path.replace(/\/history$/, "/operations"),
+        )).json() as Promise<{ mapping: MappingOperations }>,
+      ]);
       setHistory({ path, number, page });
+      setOperations(catalogue.mapping);
     } catch (error) {
       setFeedback((error as Error).message);
     } finally {
@@ -114,6 +124,7 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
             setSelection(Number(event.target.value));
             setFeedback("");
             setHistory(undefined);
+            setOperations(undefined);
           }}
         >
           {contexts.map((context, index) => (
@@ -147,6 +158,30 @@ export function MappingWorkspace({ contexts }: { contexts: MappingContext[] }) {
       {history && (
         <>
           {history.page.mapping_type && <p>Mapping type: {history.page.mapping_type.name}</p>}
+          {operations && (
+            <section aria-label="Authorized mapped operations">
+              {Object.keys(operations.allowed_transactions).length === 0 ? (
+                <p>
+                  No transactions or data fields are authorized through this
+                  mapping type. A mapping confers no access to unlisted data.
+                </p>
+              ) : (
+                <>
+                  <p>Authorized transactions</p>
+                  <ul>
+                    {Object.entries(operations.allowed_transactions).map(
+                      ([verb, { fields }]) => (
+                        <li key={verb}>
+                          {verb} · fields: {fields.join(", ")}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                  <p>Shared data fields: {operations.shared_data_fields.join(", ")}</p>
+                </>
+              )}
+            </section>
+          )}
           <ol aria-label="Mapping History">
             {history.page.data.map((entry) => (
               <li key={entry.id}>
