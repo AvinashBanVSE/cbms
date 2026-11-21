@@ -1,10 +1,10 @@
-# CBM Portal Frontend
+# CBMS Frontend
 
-This is the Next.js user interface for the Commercial Business Management Portal.
+This is the Next.js user interface for CBMS, the Centralized Business Management System.
 
 ## Design boundary
 
-The frontend presents only confirmed CBM Portal workflows. It must not expose template demonstrations, sample business records, external template links, or fabricated account data as Portal functionality. Every operational screen uses the Laravel API as its source of truth.
+The frontend presents only confirmed CBMS workflows. It must not expose template demonstrations, sample business records, external template links, or fabricated account data as system functionality. Every operational screen uses the Laravel API as its source of truth.
 
 The initial interface provides an English-only responsive portal shell, light and dark appearance support, and a compact navigation foundation. Additional workspaces are introduced only with their authorized API workflow, permission checks and tests.
 

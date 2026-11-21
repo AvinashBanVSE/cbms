@@ -23,7 +23,7 @@ const Login = () => {
           </Link>
 
           <div>
-            <CardTitle className='mb-2 text-2xl font-semibold'>Sign in to CBM Portal</CardTitle>
+            <CardTitle className='mb-2 text-2xl font-semibold'>Sign in to CBMS</CardTitle>
             <CardDescription className='text-base'>Use your assigned User Code and password.</CardDescription>
           </div>
         </CardHeader>

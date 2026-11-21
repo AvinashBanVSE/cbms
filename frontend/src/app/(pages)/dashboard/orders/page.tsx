@@ -20,14 +20,14 @@ const foundationAreas = [
   }
 ]
 
-const PortalOverviewPage = () => {
+const SystemOverviewPage = () => {
   return (
     <section className='space-y-6'>
       <div className='space-y-2'>
-        <p className='text-primary text-sm font-medium'>CBM PORTAL</p>
-        <h1 className='text-3xl font-semibold tracking-tight'>Portal overview</h1>
+        <p className='text-primary text-sm font-medium'>CBMS</p>
+        <h1 className='text-3xl font-semibold tracking-tight'>System overview</h1>
         <p className='text-muted-foreground max-w-2xl'>
-          A secure foundation for governed business operations across the CBM hierarchy.
+          A secure foundation for governed business operations across the CBMS hierarchy.
         </p>
       </div>
 
@@ -49,9 +49,9 @@ const PortalOverviewPage = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Workspace data</CardTitle>
+          <CardTitle>System data</CardTitle>
           <CardDescription>
-            Authorized workspace data will appear here after the Portal API session is connected.
+            Authorized system data will appear here after the API session is connected.
           </CardDescription>
         </CardHeader>
         <CardContent className='text-muted-foreground text-sm'>
@@ -62,4 +62,4 @@ const PortalOverviewPage = () => {
   )
 }
 
-export default PortalOverviewPage
+export default SystemOverviewPage

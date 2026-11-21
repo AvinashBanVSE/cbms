@@ -33,12 +33,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'CBMS',
   description:
-    'Build modern admin dashboards Commercial Business Management Portal.',
+    'Centralized Business Management System.',
   metadataBase: new URL(`${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}`),
   openGraph: {
     title: 'CBMS',
     description:
-      'Build modern admin dashboards Commercial Business Management Portal.',
+    'Centralized Business Management System.',
     type: 'website',
     siteName: 'CBMS',
     url: process.env.NEXT_PUBLIC_APP_URL,
@@ -56,7 +56,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'CBMS',
     description:
-      'Build modern admin dashboards Commercial Business Management Portal.'
+    'Centralized Business Management System.'
   }
 }
 

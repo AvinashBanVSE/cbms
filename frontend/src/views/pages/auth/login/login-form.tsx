@@ -65,7 +65,7 @@ const LoginForm = () => {
         </div>
         <Field>
           <Button className='w-full' type='submit'>
-            Sign in to CBM Portal
+            Sign in to CBMS
           </Button>
         </Field>
       </FieldGroup>

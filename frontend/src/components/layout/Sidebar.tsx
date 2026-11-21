@@ -486,7 +486,7 @@ const SidebarLayout = () => {
               <LogoSvg className='[&_rect]:fill-sidebar [&_rect:first-child]:fill-primary' />
               <div className='flex flex-col items-start'>
                 <span className='text-lg font-semibold text-nowrap'>{themeConfig.templateName}</span>
-                <span className='text-xs font-light text-nowrap'>Business Management Portal</span>
+                <span className='text-xs font-light text-nowrap'>Centralized Business Management System</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
