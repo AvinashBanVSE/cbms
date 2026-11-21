@@ -31,7 +31,7 @@ test.describe('CBMS overview dashboard', () => {
   })
 
   test('redirects unauthenticated users to sign in', async ({ page }) => {
-    await page.route('**/api/v1/installation', async route => {
+    await page.route('**/api/v1/workspace-access', async route => {
       await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' })
     })
 
