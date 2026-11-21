@@ -22,12 +22,12 @@ const LoginForm = () => {
   return (
     <form onSubmit={e => e.preventDefault()}>
       <FieldGroup className='gap-4'>
-        {/* Email */}
+        {/* User Code */}
         <Field className='gap-2'>
-          <FieldLabel htmlFor='userEmail' className='leading-5'>
-            Email address*
+          <FieldLabel htmlFor='userCode' className='leading-5'>
+            User Code*
           </FieldLabel>
-          <Input type='email' id='userEmail' placeholder='Enter your email address' />
+          <Input id='userCode' inputMode='text' autoCapitalize='characters' maxLength={6} placeholder='AA0000' required />
         </Field>
         {/* Password */}
         <Field className='w-full gap-2'>
@@ -65,7 +65,7 @@ const LoginForm = () => {
         </div>
         <Field>
           <Button className='w-full' type='submit'>
-            Sign in to Shadcn Studio
+            Sign in to CBM Portal
           </Button>
         </Field>
       </FieldGroup>

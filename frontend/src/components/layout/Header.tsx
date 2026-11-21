@@ -5,11 +5,7 @@ import { Fragment } from 'react'
 
 import { usePathname } from 'next/navigation'
 
-// Third-party Imports
-import { LanguagesIcon } from 'lucide-react'
-
 // Component Imports
-import LanguageDropdown from '@/components/shared/LanguageDropdown'
 import ModeToggle from '@/components/layout/ModeToggle'
 import ProfileDropdown from '@/components/shared/ProfileDropdown'
 import {
@@ -20,7 +16,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator
 } from '@/components/ui/breadcrumb'
-import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 
@@ -55,28 +50,7 @@ const Header = () => {
           </Breadcrumb>
         </div>
         <div className='flex items-center gap-1.5'>
-          {/* GitHub Button */}
-          <div className='pt-2 max-md:hidden'>
-            <a
-              className='github-button'
-              href='https://github.com/shadcnstudio/shadcn-nextjs-admincn-admin-template-free'
-              data-icon='octicon-star'
-              data-size='large'
-              data-show-count='true'
-              aria-label='Star shadcnstudio/shadcn-studio on GitHub'
-            >
-              Star
-            </a>
-          </div>
-          <script async defer src='https://buttons.github.io/buttons.js'></script>
           <ModeToggle />
-          <LanguageDropdown
-            trigger={
-              <Button variant='ghost' size='icon-lg'>
-                <LanguagesIcon />
-              </Button>
-            }
-          />
           <ProfileDropdown />
         </div>
       </div>
