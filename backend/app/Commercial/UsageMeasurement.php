@@ -23,7 +23,7 @@ final class UsageMeasurement
      * Record consumption against a limit for a covered business. Returns the resulting window
      * state. Throws when a hard limit would be exceeded.
      *
-     * @param array{idempotency_key?: ?string, occurred_at?: ?string} $options
+     * @param  array{idempotency_key?: ?string, occurred_at?: ?string}  $options
      * @return array{usage_limit: string, business_id: string, consumed: int, limit: int, warning: bool, state: string, period_start: string, period_end: string}
      */
     public function record(string $limitCode, string $business, int $quantity, array $options = []): array

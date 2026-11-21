@@ -31,4 +31,11 @@ final class PermissionCatalogue
         'Shop' => ['mapping.initiate', 'mapping.confirm', 'mapping.end', 'mapping.history.view'],
         'Distributor' => ['mapping.verify', 'mapping.end', 'mapping.history.view'],
     ];
+
+    /**
+     * The explicitly permitted workflow that governs first-party client activation (§6D.7).
+     * Authorized against a Tenant's own Parent Organization, as a Tenant Owner/Admin action;
+     * it never confers a business permission and stays separate from action authorization.
+     */
+    public const TENANT_ADMIN = ['clients.activate'];
 }

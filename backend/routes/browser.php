@@ -14,6 +14,7 @@ use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
 use App\Http\Controllers\BusinessTimePresentationController;
+use App\Http\Controllers\ClientActivationController;
 use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
@@ -89,6 +90,10 @@ Route::prefix('api/v1')->group(function (): void {
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');
         Route::post('installation/owner', [InstallationController::class, 'owner'])->middleware('throttle:5,1,owner');
+        // Client-side Desktop activation exchange (§6D.7): no portal session — the client
+        // presents an activation code and is bound to the Tenant.
+        Route::post('clients/desktop/activate', [ClientActivationController::class, 'consumeCode'])
+            ->middleware('throttle:10,1,client-activate');
         Route::post('login', function (Request $request) {
             $request->session()->forget(OrganizationMfaPolicy::ENROLLMENT_SESSION);
             $input = $request->validate([
@@ -214,6 +219,18 @@ Route::prefix('api/v1')->group(function (): void {
         ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/mappings/{mapping}/operations', [BusinessMappingController::class, 'operations'])
         ->whereUuid(['business', 'mapping']);
+    // First-party client activation (§6D.7): Tenant Owner/Admin governs Desktop codes and the
+    // device list through the authenticated portal; the client itself exchanges a code or a
+    // Mobile activation through the separate activation token, never through the portal session.
+    Route::post('tenants/{tenant}/clients/desktop-codes', [ClientActivationController::class, 'issueCode'])
+        ->whereUuid('tenant')->middleware('throttle:10,1,client-code-issue');
+    Route::get('tenants/{tenant}/clients', [ClientActivationController::class, 'devices'])
+        ->whereUuid('tenant');
+    Route::delete('tenants/{tenant}/clients/instances/{instance}', [ClientActivationController::class, 'revoke'])
+        ->whereUuid(['tenant', 'instance']);
+    // Mobile activation binds one active instance to the signed-in eligible customer user.
+    Route::post('clients/mobile/activate', [ClientActivationController::class, 'activateMobile'])
+        ->middleware('throttle:10,1,client-activate');
     Route::get('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'show'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle', [BusinessLifecycleController::class, 'transition'])->whereUuid('business');
     Route::post('businesses/{business}/lifecycle/closure-policy', [BusinessLifecycleController::class, 'closurePolicy'])->whereUuid('business');
