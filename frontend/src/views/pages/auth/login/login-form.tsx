@@ -48,7 +48,7 @@ const LoginForm = () => {
       }
 
       setNotice('Signed in successfully.')
-      if (response.status === 200) window.location.assign('/dashboard')
+      if (response.ok) window.location.assign('/dashboard')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Sign-in failed. Please retry.')
     } finally {
