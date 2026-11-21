@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\MainPortalAccess;
 use App\Commercial\BillingReminder;
+use App\Commercial\PaymentRetry;
 use App\Commercial\SubscriptionTerms;
 use App\Configuration\BusinessTimePresentation;
 use App\Configuration\GlobalBusinessSettings;
@@ -153,6 +154,26 @@ final class CommercialBillingController
     {
         $this->access->requirePermission('commercial.manage');
         $result = $reminder->record($invoice, Auth::id() ?? throw new \RuntimeException('No authenticated user.'));
+        $status = $result['duplicate'] ? 200 : 201;
+
+        return response()->json($result, $status)->header('Cache-Control', 'no-store');
+    }
+
+    /** Retry attempt history for an invoice. */
+    public function retries(string $invoice, PaymentRetry $retry): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $row = $this->findInvoice($invoice, false);
+
+        return response()->json(['invoice' => $this->balance($row, $this->paid($invoice)), 'history' => $retry->history($invoice)])
+            ->header('Cache-Control', 'no-store');
+    }
+
+    /** Schedule the next governed payment retry for the invoice if its policy allows. */
+    public function scheduleRetry(string $invoice, PaymentRetry $retry): JsonResponse
+    {
+        $this->access->requirePermission('commercial.manage');
+        $result = $retry->schedule($invoice, Auth::id() ?? throw new \RuntimeException('No authenticated user.'));
         $status = $result['duplicate'] ? 200 : 201;
 
         return response()->json($result, $status)->header('Cache-Control', 'no-store');

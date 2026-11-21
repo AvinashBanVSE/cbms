@@ -2267,6 +2267,8 @@ it("issues a billing record and records payments and reversals", async () => {
       });
     if (url === "commercial/invoices/invoice1/reminders")
       return json({ history: results ? [{ id: "reminder1", days_before: 3, scheduled_on: "2032-02-26", outstanding_paise: 12345 }] : [] });
+    if (url === "commercial/invoices/invoice1/retries")
+      return json({ history: results ? [{ id: "retry1", attempt: 1, state: "Scheduled", scheduled_on: "2032-03-24", outstanding_paise: 12345 }] : [] });
     if (url === "commercial/invoices/invoice1/payments") {
       expect(body).toEqual({ amount_paise: "2000", receipt_reference: "R-01" });
       paid = 2000;
@@ -2312,6 +2314,10 @@ it("issues a billing record and records payments and reversals", async () => {
   expect(document.body.textContent).toContain("Reminder history");
   expect(document.body.textContent).toContain("(₹20.00)");
   expect(document.body.textContent).toContain("Reversal reason: Correction");
+  await submit('form[data-operation="billing-retry"]');
+  expect(document.body.textContent).toContain("Payment retry scheduled");
+  expect(document.body.textContent).toContain("Retry history");
+  expect(document.body.textContent).toContain("Attempt 1 · Scheduled");
   set(reverse, "payment", "missing");
   set(reverse, "reason", "Correction");
   await submit(reverse);

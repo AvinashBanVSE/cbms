@@ -225,6 +225,8 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('invoices/{invoice}/payments/{payment}/reverse', [CommercialBillingController::class, 'reverse'])->whereUuid(['invoice', 'payment']);
         Route::get('invoices/{invoice}/reminders', [CommercialBillingController::class, 'reminders'])->whereUuid('invoice');
         Route::post('invoices/{invoice}/reminders', [CommercialBillingController::class, 'sendReminder'])->whereUuid('invoice');
+        Route::get('invoices/{invoice}/retries', [CommercialBillingController::class, 'retries'])->whereUuid('invoice');
+        Route::post('invoices/{invoice}/retries', [CommercialBillingController::class, 'scheduleRetry'])->whereUuid('invoice');
         Route::get('/', [CommercialController::class, 'index']);
         Route::post('accounts', [CommercialController::class, 'account']);
         Route::post('entitlements', [CommercialController::class, 'entitlement']);

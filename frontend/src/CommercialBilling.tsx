@@ -26,6 +26,14 @@ interface ReminderEntry {
   outstanding_paise: number;
 }
 
+interface RetryEntry {
+  id: string;
+  attempt: number;
+  scheduled_on: string;
+  outstanding_paise: number;
+  state: string;
+}
+
 interface Page<T> {
   data: T[];
   next_page_url: string | null;
@@ -49,6 +57,7 @@ export function CommercialBilling() {
     invoice: Invoice;
     history: Page<LedgerEntry>;
     reminders: ReminderEntry[];
+    retries: RetryEntry[];
     presentation?: { negative_amount: string | null };
   }>();
   const [historyPage, setHistoryPage] = useState(1);
@@ -77,11 +86,12 @@ export function CommercialBilling() {
   async function load(id: string, number = 1) {
     const invoicePath =
       "commercial/invoices/" + encodeURIComponent(id);
-    const [detail, reminders] = await Promise.all([
+    const [detail, reminders, retries] = await Promise.all([
       (
         await portalRequest(invoicePath + "/payments?page=" + number)
       ).json(),
       (await portalRequest(invoicePath + "/reminders")).json(),
+      (await portalRequest(invoicePath + "/retries")).json(),
     ]);
     setSelected({
       invoice: (detail as { invoice: Invoice }).invoice,
@@ -89,6 +99,7 @@ export function CommercialBilling() {
       presentation: (detail as { presentation?: { negative_amount: string | null } })
         .presentation,
       reminders: (reminders as { history: ReminderEntry[] }).history,
+      retries: (retries as { history: RetryEntry[] }).history,
     });
     setHistoryPage(number);
   }
@@ -128,6 +139,14 @@ export function CommercialBilling() {
             {},
           );
           setNotice("Billing reminder recorded.");
+        } else if (operation === "billing-retry") {
+          await portalRequest(
+            "commercial/invoices/" +
+              encodeURIComponent(invoice) +
+              "/retries",
+            {},
+          );
+          setNotice("Payment retry scheduled.");
         } else {
           await portalRequest(path, fields);
           setNotice("Payment recorded.");
@@ -216,6 +235,9 @@ export function CommercialBilling() {
           <form data-operation="billing-reminder" onSubmit={submit}>
             <button disabled={busy}>Record billing reminder</button>
           </form>
+          <form data-operation="billing-retry" onSubmit={submit}>
+            <button disabled={busy}>Schedule payment retry</button>
+          </form>
           <ul aria-label="Payment ledger">
             {selected.history.data.map((entry) => (
               <li key={entry.id}>
@@ -238,6 +260,20 @@ export function CommercialBilling() {
                     {reminder.scheduled_on} · {reminder.days_before} day
                     {reminder.days_before === 1 ? "" : "s"} before due ·{" "}
                     {money(reminder.outstanding_paise)} outstanding
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {selected.retries.length > 0 && (
+            <>
+              <h4>Retry history</h4>
+              <ul aria-label="Retry history">
+                {selected.retries.map((retry) => (
+                  <li key={retry.id}>
+                    Attempt {retry.attempt} · {retry.state} ·{" "}
+                    {retry.scheduled_on} · {money(retry.outstanding_paise)}{" "}
+                    outstanding
                   </li>
                 ))}
               </ul>
