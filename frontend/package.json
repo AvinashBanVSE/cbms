@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:e2e": "playwright test",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx}\"",
@@ -38,7 +39,9 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "1.51.1",
     "@stylistic/eslint-plugin": "5.10.0",
+    "@playwright/test": "1.51.1",
     "@tailwindcss/postcss": "4",
     "@types/node": "20",
     "@types/react": "19",
