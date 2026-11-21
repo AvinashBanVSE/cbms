@@ -34,14 +34,14 @@ export const metadata: Metadata = {
   title: 'CBMS',
   description:
     'Centralized Business Management System.',
-  metadataBase: new URL(`${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}`),
+  metadataBase: new URL(`${process.env.NEXT_PUBLIC_APP_URL ?? 'https://cbmsys.in'}`),
   openGraph: {
     title: 'CBMS',
     description:
     'Centralized Business Management System.',
     type: 'website',
     siteName: 'CBMS',
-    url: process.env.NEXT_PUBLIC_APP_URL,
+    url: process.env.NEXT_PUBLIC_APP_URL ?? 'https://cbmsys.in',
     images: [
       {
         url: '/images/og-image.png',

@@ -17,6 +17,8 @@ pnpm dev
 
 Use `pnpm check-types`, `pnpm lint`, and `pnpm build` before publishing frontend changes. API integration and environment configuration are added through the project deployment configuration rather than hard-coded URLs.
 
+For the registered frontend domain, configure `NEXT_PUBLIC_APP_URL=https://cbmsys.in` and point `NEXT_PUBLIC_API_BASE_URL` to the deployed Laravel API `/api/v1` endpoint.
+
 ## Attribution
 
 The interface foundation includes code from the AdminCN Free template under the MIT License. The full license text remains in [LICENSE.md](LICENSE.md).

@@ -15,19 +15,52 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
+import { cbmsRequest } from '@/lib/cbms-api'
 
 const LoginForm = () => {
   const [isVisible, setIsVisible] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy) return
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries())
+
+    setBusy(true)
+    setNotice('')
+
+    try {
+      const response = await cbmsRequest('login', {
+        code: String(values.code).trim().toUpperCase(),
+        email: String(values.email).trim(),
+        password: String(values.password)
+      })
+
+      setNotice(response.status === 202 ? 'Additional authenticator verification is required.' : 'Signed in successfully.')
+      if (response.status === 200) window.location.assign('/dashboard')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Sign-in failed. Please retry.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
-    <form onSubmit={e => e.preventDefault()}>
+    <form onSubmit={submit}>
       <FieldGroup className='gap-4'>
         {/* User Code */}
         <Field className='gap-2'>
           <FieldLabel htmlFor='userCode' className='leading-5'>
             User Code*
           </FieldLabel>
-          <Input id='userCode' inputMode='text' autoCapitalize='characters' maxLength={6} placeholder='AA0000' required />
+          <Input name='code' id='userCode' inputMode='text' autoCapitalize='characters' maxLength={6} placeholder='AA0000' required />
+        </Field>
+        <Field className='gap-2'>
+          <FieldLabel htmlFor='email' className='leading-5'>
+            Email address*
+          </FieldLabel>
+          <Input name='email' type='email' id='email' placeholder='name@example.com' required />
         </Field>
         {/* Password */}
         <Field className='w-full gap-2'>
@@ -35,7 +68,7 @@ const LoginForm = () => {
             Password*
           </FieldLabel>
           <InputGroup>
-            <InputGroupInput id='password' type={isVisible ? 'text' : 'password'} placeholder='••••••••••••••••' />
+            <InputGroupInput name='password' id='password' type={isVisible ? 'text' : 'password'} placeholder='••••••••••••••••' required />
             <InputGroupAddon align='inline-end' className='pr-1.5'>
               <Button
                 type='button'
@@ -64,10 +97,11 @@ const LoginForm = () => {
           </Link>
         </div>
         <Field>
-          <Button className='w-full' type='submit'>
+          <Button className='w-full' type='submit' disabled={busy}>
             Sign in to CBMS
           </Button>
         </Field>
+        {notice && <p role='status' className='text-muted-foreground text-sm'>{notice}</p>}
       </FieldGroup>
     </form>
   )
