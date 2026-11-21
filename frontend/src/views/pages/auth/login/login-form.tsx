@@ -4,8 +4,6 @@
 import { useState } from 'react'
 
 // Next Imports
-import Link from 'next/link'
-
 // Third-party Imports
 import { EyeIcon, EyeOffIcon } from 'lucide-react'
 
@@ -121,9 +119,6 @@ const LoginForm = () => {
               Remember Me
             </FieldLabel>
           </Field>
-          <Link href='/pages/auth/forgot-password' className='text-base text-nowrap hover:underline'>
-            Forgot Password?
-          </Link>
         </div>
         <Field>
           <Button className='w-full' type='submit' disabled={busy}>

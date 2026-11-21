@@ -59,7 +59,7 @@ const SystemOverviewPage = () => {
         if (!active) return
 
         if (error instanceof CbmsApiError && error.status === 401) {
-          router.replace('/pages/auth/login')
+          router.replace('/login')
 
           return
         }

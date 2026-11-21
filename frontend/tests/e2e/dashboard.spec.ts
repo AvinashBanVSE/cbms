@@ -12,7 +12,7 @@ test.describe('CBMS overview dashboard', () => {
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ stage: 'ready', user_code: 'AB1234' }) })
     })
 
-    await page.goto('/pages/setup')
+    await page.goto('/setup')
     await page.getByLabel('Deployment setup code*').fill('a'.repeat(32))
     await page.getByLabel('Legal name*').fill('CBMS Holdings')
     await page.getByLabel('Professional name*').fill('CBMS')
@@ -75,7 +75,7 @@ test.describe('CBMS overview dashboard', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ administration: [], mapping_contexts: [], delegations: [] }) })
     })
 
-    await page.goto('/pages/auth/login')
+    await page.goto('/login')
     await page.getByLabel('User Code*').fill('AA0000')
     await page.getByLabel('Email address*').fill('owner@example.com')
     await page.getByLabel('Password*').fill('password')
@@ -92,6 +92,6 @@ test.describe('CBMS overview dashboard', () => {
     })
 
     await page.goto('/dashboard')
-    await expect(page).toHaveURL(/\/pages\/auth\/login$/)
+    await expect(page).toHaveURL(/\/login$/)
   })
 })

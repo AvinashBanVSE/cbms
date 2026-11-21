@@ -37,7 +37,7 @@ const Register = () => {
 
             <p className='text-muted-foreground text-center'>
               Already have an account?{' '}
-              <Link href='/pages/auth/login' className='text-card-foreground hover:underline'>
+              <Link href='/login' className='text-card-foreground hover:underline'>
                 Sign in instead
               </Link>
             </p>

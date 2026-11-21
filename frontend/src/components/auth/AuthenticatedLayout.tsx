@@ -23,12 +23,12 @@ const AuthenticatedLayout = ({ children }: Readonly<{ children: ReactNode }>) =>
         if (!active) return
 
         if (error instanceof CbmsApiError && error.status === 401) {
-          router.replace('/pages/auth/login')
+          router.replace('/login')
 
           return
         }
 
-        router.replace('/pages/misc/error-page')
+        router.replace('/error')
       })
 
     return () => {

@@ -41,7 +41,7 @@ const ProfileDropdown = () => {
             <span className='text-muted-foreground text-sm'>{STATIC_USER.email}</span>
           </div>
         </DropdownMenuLabel>
-        <DropdownMenuItem render={<Link href='/pages/auth/login' />}>
+        <DropdownMenuItem render={<Link href='/login' />}>
           <LogInIcon />
           <span>Sign in</span>
         </DropdownMenuItem>

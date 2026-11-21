@@ -32,12 +32,6 @@ const Login = () => {
           <div className='space-y-4'>
             <LoginForm />
 
-            <p className='text-muted-foreground text-center text-base'>
-              Need help accessing your account?{' '}
-              <Link href='/pages/auth/forgot-password' className='text-card-foreground hover:underline'>
-                Recover access
-              </Link>
-            </p>
           </div>
         </CardContent>
       </Card>
