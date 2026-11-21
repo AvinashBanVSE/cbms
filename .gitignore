@@ -3,3 +3,9 @@ CBM-Foundation-Stages-4-to-7-Handoff.md
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# local working artifacts — not for remote
+/*.png
+front-end-rejected-backup.zip
+/CBMS_Approved_Core_Rules_MR.md
+/CBM_MASTER_BUSINESS_AND_ARCHITECTURE_DECISIONS.md
