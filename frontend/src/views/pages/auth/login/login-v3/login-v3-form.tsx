@@ -13,7 +13,7 @@ type LoginStage = 'credentials' | 'authenticator_required' | 'authenticator_enro
 const LoginV3Form = () => {
   const [isVisible, setIsVisible] = useState(false)
   const [code, setCode] = useState('')
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [authenticatorCode, setAuthenticatorCode] = useState('')
   const [stage, setStage] = useState<LoginStage>('credentials')
@@ -40,7 +40,7 @@ const LoginV3Form = () => {
         },
         body: JSON.stringify({
           code: code.trim().toUpperCase(),
-          email: email.trim(),
+          identifier: identifier.trim(),
           password,
           ...(stage === 'authenticator_required' ? { authenticator_code: authenticatorCode } : {})
         })
@@ -66,7 +66,7 @@ const LoginV3Form = () => {
       }
       if (response.status === 401) throw new Error('Invalid login credentials or authenticator code.')
       if (response.status === 429) throw new Error('Too many attempts. Please try again later.')
-      if (response.status === 422) throw new Error('Please verify your User Code, email and password.')
+      if (response.status === 422) throw new Error('Please verify your User Code, login identifier and password.')
       throw new Error('Unable to sign in. Please try again.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to sign in.')
@@ -106,9 +106,9 @@ const LoginV3Form = () => {
           />
         </Field>
         <Field className='gap-2'>
-          <FieldLabel htmlFor='userEmail'>Email address*</FieldLabel>
-          <Input id='userEmail' type='email' value={email} onChange={event => setEmail(event.target.value)}
-            placeholder='Enter your email address' autoComplete='email' required disabled={busy} />
+          <FieldLabel htmlFor='loginIdentifier'>Email, Username or Mobile Number*</FieldLabel>
+          <Input id='loginIdentifier' type='text' value={identifier} onChange={event => setIdentifier(event.target.value)}
+            placeholder='Enter your registered email, username or mobile number' autoComplete='username' required maxLength={254} disabled={busy} />
         </Field>
         <Field className='w-full gap-2'>
           <FieldLabel htmlFor='password'>Password*</FieldLabel>
