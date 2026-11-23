@@ -8,7 +8,11 @@ use Illuminate\Validation\ValidationException;
 
 final class MappingPermissions
 {
-    public const MAX_ACTIONS = 4;
+    /**
+     * A User / Role / Delegation / Access assignment may carry at most the full symmetric
+     * mapping verb set (7 actions per kind), so the cap matches the catalogue width.
+     */
+    public const MAX_ACTIONS = 7;
 
     public static function validate(?string $kind, array $actions): void
     {

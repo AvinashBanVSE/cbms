@@ -1,5 +1,5 @@
 // Third-party Imports
-import { DownloadIcon, FileSpreadsheetIcon, FileTextIcon, PlusIcon, SearchIcon, UploadIcon } from 'lucide-react'
+import { FileSpreadsheetIcon, FileTextIcon, PlusIcon, SearchIcon, UploadIcon, DownloadIcon } from 'lucide-react'
 
 // Component Imports
 import { Button } from '@/components/ui/button'
@@ -26,9 +26,24 @@ export interface UserTableToolbarProps {
   rowsPerPage: number
   onSearch: (search: string) => void
   onRowsPerPageChange: (rowsPerPage: number) => void
+  onExportCsv: () => void
+  onExportExcel: () => void
+  onExportJson: () => void
+  onOpenAddSheet: () => void
+  onOpenImportDialog: () => void
 }
 
-export function UserTableToolbar({ search, rowsPerPage, onSearch, onRowsPerPageChange }: UserTableToolbarProps) {
+export function UserTableToolbar({
+  search,
+  rowsPerPage,
+  onSearch,
+  onRowsPerPageChange,
+  onExportCsv,
+  onExportExcel,
+  onExportJson,
+  onOpenAddSheet,
+  onOpenImportDialog
+}: UserTableToolbarProps) {
   return (
     <div className='flex gap-4 p-6 max-sm:flex-col sm:items-center sm:justify-between'>
       <div className='w-full max-w-2xs'>
@@ -88,28 +103,28 @@ export function UserTableToolbar({ search, rowsPerPage, onSearch, onRowsPerPageC
             <span className='max-lg:hidden'>Export</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end' className='w-auto'>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportCsv}>
               <FileTextIcon className='size-4' />
               Export as CSV
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportExcel}>
               <FileSpreadsheetIcon className='size-4' />
               Export as Excel
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportJson}>
               <FileTextIcon className='size-4' />
               Export as JSON
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button variant='outline'>
+        <Button variant='outline' onClick={onOpenImportDialog}>
           <DownloadIcon className='size-4' />
           <span className='max-lg:hidden'>Import</span>
         </Button>
 
-        <Button>
+        <Button onClick={onOpenAddSheet}>
           <PlusIcon />
           <span className='max-lg:hidden'>Add New User</span>
         </Button>

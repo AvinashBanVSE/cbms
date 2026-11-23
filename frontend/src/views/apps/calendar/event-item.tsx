@@ -4,6 +4,8 @@
 import { useMemo } from 'react'
 
 // Third-party Imports
+import type { DraggableAttributes } from '@dnd-kit/core'
+import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import { differenceInMinutes, format, getMinutes, isPast } from 'date-fns'
 
 // Type Imports
@@ -30,10 +32,15 @@ interface EventWrapperProps {
   event: CalendarEvent
   isFirstDay?: boolean
   isLastDay?: boolean
+  isDragging?: boolean
   onClick?: (e: React.MouseEvent) => void
   className?: string
   children: React.ReactNode
   currentTime?: Date
+  dndListeners?: SyntheticListenerMap
+  dndAttributes?: DraggableAttributes
+  onMouseDown?: (e: React.MouseEvent) => void
+  onTouchStart?: (e: React.TouchEvent) => void
 }
 
 // Shared wrapper component for event styling
@@ -41,10 +48,15 @@ function EventWrapper({
   event,
   isFirstDay = true,
   isLastDay = true,
+  isDragging,
   onClick,
   className,
   children,
-  currentTime
+  currentTime,
+  dndListeners,
+  dndAttributes,
+  onMouseDown,
+  onTouchStart
 }: EventWrapperProps) {
   // Always use the currentTime (if provided) to determine if the event is in the past
   const displayEnd = currentTime
@@ -56,14 +68,19 @@ function EventWrapper({
   return (
     <button
       className={cn(
-        'focus-visible:border-ring focus-visible:ring-ring/50 flex h-full w-full text-left font-medium transition outline-none select-none focus-visible:ring-[3px] data-past-event:line-through',
+        'focus-visible:border-ring focus-visible:ring-ring/50 flex h-full w-full text-left font-medium transition outline-none select-none focus-visible:ring-[3px] data-dragging:cursor-grabbing data-dragging:shadow-lg data-past-event:line-through',
         getEventColorClasses(event.color),
         getBorderRadiusClasses(isFirstDay, isLastDay),
         className
       )}
       data-calendar-event
+      data-dragging={isDragging || undefined}
       data-past-event={isEventInPast || undefined}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onTouchStart={onTouchStart}
+      {...dndListeners}
+      {...dndAttributes}
     >
       {children}
     </button>
@@ -72,21 +89,27 @@ function EventWrapper({
 
 interface EventItemProps {
   event: CalendarEvent
-  view: 'month' | 'week' | 'day'
+  view: 'month' | 'week' | 'day' | 'agenda'
+  isDragging?: boolean
   onClick?: (e: React.MouseEvent) => void
   showTime?: boolean
-  currentTime?: Date
+  currentTime?: Date // For updating time during drag
   isFirstDay?: boolean
   isLastDay?: boolean
   spansLeft?: boolean
   spansRight?: boolean
   children?: React.ReactNode
   className?: string
+  dndListeners?: SyntheticListenerMap
+  dndAttributes?: DraggableAttributes
+  onMouseDown?: (e: React.MouseEvent) => void
+  onTouchStart?: (e: React.TouchEvent) => void
 }
 
 export function EventItem({
   event,
   view,
+  isDragging,
   onClick,
   showTime,
   currentTime,
@@ -95,8 +118,15 @@ export function EventItem({
   spansLeft = false,
   spansRight = false,
   children,
-  className
+  className,
+  dndListeners,
+  dndAttributes,
+  onMouseDown,
+  onTouchStart
 }: EventItemProps) {
+  const eventColor = event.color
+
+  // Use the provided currentTime (for dragging) or the event's actual time
   const displayStart = useMemo(() => {
     return currentTime || new Date(event.start)
   }, [currentTime, event.start])
@@ -144,6 +174,7 @@ export function EventItem({
           event={event}
           isFirstDay={isFirstDay}
           isLastDay={isLastDay}
+          isDragging={isDragging}
           onClick={onClick}
           className={cn(
             'relative h-[var(--event-height)] w-full min-w-0 items-center overflow-hidden text-[10px] sm:text-xs',
@@ -152,6 +183,10 @@ export function EventItem({
             className
           )}
           currentTime={currentTime}
+          dndListeners={dndListeners}
+          dndAttributes={dndAttributes}
+          onMouseDown={onMouseDown}
+          onTouchStart={onTouchStart}
         >
           {monthContent ? (
             <span className='relative z-10 block min-w-0 flex-1 truncate overflow-hidden'>{monthContent}</span>
@@ -163,30 +198,73 @@ export function EventItem({
     )
   }
 
+  if (view === 'week' || view === 'day') {
+    return (
+      <EventWrapper
+        event={event}
+        isFirstDay={isFirstDay}
+        isLastDay={isLastDay}
+        isDragging={isDragging}
+        onClick={onClick}
+        className={cn(
+          'px-1 py-1 backdrop-blur-md sm:px-2',
+          durationMinutes < 45 ? 'items-center' : 'flex-col',
+          view === 'week' ? 'text-[10px] sm:text-xs' : 'text-xs',
+          className
+        )}
+        currentTime={currentTime}
+        dndListeners={dndListeners}
+        dndAttributes={dndAttributes}
+        onMouseDown={onMouseDown}
+        onTouchStart={onTouchStart}
+      >
+        {durationMinutes < 45 ? (
+          <div className='truncate'>
+            {event.title}{' '}
+            {showTime && <span className='opacity-70'>{formatTimeWithOptionalMinutes(displayStart)}</span>}
+          </div>
+        ) : (
+          <>
+            <div className='truncate font-medium'>{event.title}</div>
+            {showTime && <div className='truncate font-normal opacity-70 sm:text-[11px]'>{getEventTime()}</div>}
+          </>
+        )}
+      </EventWrapper>
+    )
+  }
+
+  // Agenda view - kept separate since it's significantly different
   return (
-    <EventWrapper
-      event={event}
-      isFirstDay={isFirstDay}
-      isLastDay={isLastDay}
-      onClick={onClick}
+    <button
       className={cn(
-        'px-1 py-1 backdrop-blur-md sm:px-2',
-        durationMinutes < 45 ? 'items-center' : 'flex-col',
-        view === 'week' ? 'text-[10px] sm:text-xs' : 'text-xs',
+        'focus-visible:border-ring focus-visible:ring-ring/50 flex w-full flex-col gap-1 rounded p-2 text-left transition outline-none focus-visible:ring-[3px] data-past-event:line-through data-past-event:opacity-90',
+        getEventColorClasses(eventColor),
         className
       )}
-      currentTime={currentTime}
+      data-past-event={isPast(new Date(event.end)) || undefined}
+      onClick={onClick}
+      onMouseDown={onMouseDown}
+      onTouchStart={onTouchStart}
+      {...dndListeners}
+      {...dndAttributes}
     >
-      {durationMinutes < 45 ? (
-        <div className='truncate'>
-          {event.title} {showTime && <span className='opacity-70'>{formatTimeWithOptionalMinutes(displayStart)}</span>}
-        </div>
-      ) : (
-        <>
-          <div className='truncate font-medium'>{event.title}</div>
-          {showTime && <div className='truncate font-normal opacity-70 sm:text-[11px]'>{getEventTime()}</div>}
-        </>
-      )}
-    </EventWrapper>
+      <div className='text-sm font-medium'>{event.title}</div>
+      <div className='text-xs opacity-70'>
+        {event.allDay ? (
+          <span>All day</span>
+        ) : (
+          <span className='uppercase'>
+            {formatTimeWithOptionalMinutes(displayStart)} - {formatTimeWithOptionalMinutes(displayEnd)}
+          </span>
+        )}
+        {event.location && (
+          <>
+            <span className='px-1 opacity-35'> · </span>
+            <span>{event.location}</span>
+          </>
+        )}
+      </div>
+      {event.description && <div className='my-1 text-xs opacity-90'>{event.description}</div>}
+    </button>
   )
 }

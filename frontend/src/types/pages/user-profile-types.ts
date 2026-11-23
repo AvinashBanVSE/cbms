@@ -133,6 +133,58 @@ export interface ProjectDatatable {
   updatedAt?: string
 }
 
+// Team Card - Team Section Types
+export type UserTeamCardMember = {
+  name: string
+  initials: string
+  avatar?: string
+}
+
+export type UserTeamCardTag = {
+  label: string
+}
+
+export type UserTeamGridCard = {
+  id: string | number
+  title: string
+  description: string
+  initials: string
+  avatar?: string
+  avatarDark?: string
+  members: UserTeamCardMember[]
+  extraMembersCount?: number
+  tags: UserTeamCardTag[]
+}
+
+// Projects Card - Projects Section Types
+export type UserProjectCardMember = {
+  name: string
+  initials: string
+  avatar?: string
+}
+
+export type UserProjectCard = {
+  id: string | number
+  title: string
+  client: string
+  initials: string
+  logo?: string
+  logoDark?: string
+  budgetSpent: string
+  budgetTotal: string
+  startDate: string
+  deadline: string
+  description: string
+  allHours: string
+  tasks: string
+  completion: number
+  daysLeftLabel: string
+  daysLeftTone: 'success' | 'warning' | 'danger'
+  members: UserProjectCardMember[]
+  membersLabel: string
+  commentsCount: string
+}
+
 // All User Profile Page Data Types
 export type UserProfilePageData = {
   profileSections: UserProfileSection[]
@@ -145,4 +197,8 @@ export type UserProfilePageData = {
   connectionCards: ConnectionCardItem[]
   teamActions: string[]
   teams: UserTeamItem[]
+  teamCardActions: string[]
+  teamCards: UserTeamGridCard[]
+  projectCardActions: string[]
+  projectCards: UserProjectCard[]
 }

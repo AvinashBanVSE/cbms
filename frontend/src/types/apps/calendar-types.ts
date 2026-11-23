@@ -1,4 +1,4 @@
-export type CalendarView = 'month' | 'week' | 'day'
+export type CalendarView = 'month' | 'week' | 'day' | 'agenda'
 
 export interface CalendarEvent {
   id: string

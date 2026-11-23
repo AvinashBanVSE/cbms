@@ -28,7 +28,8 @@ import type { CalendarEvent } from '@/types/apps/calendar-types'
 import { useCurrentTimeIndicator } from '@/hooks/use-current-time-indicator'
 
 // Component Imports
-import { CalendarCell } from './calendar-cell'
+import { DraggableEvent } from './draggable-event'
+import { DroppableCell } from './droppable-cell'
 import { EventItem } from './event-item'
 
 // Util Imports
@@ -325,11 +326,12 @@ export function WeekView({ currentDate, events, onEventSelect, onEventCreate }: 
                 onClick={e => e.stopPropagation()}
               >
                 <div className='h-full w-full'>
-                  <EventItem
+                  <DraggableEvent
                     event={positionedEvent.event}
                     view='week'
                     onClick={e => handleEventClick(positionedEvent.event, e)}
                     showTime
+                    height={positionedEvent.height}
                   />
                 </div>
               </div>
@@ -360,8 +362,10 @@ export function WeekView({ currentDate, events, onEventSelect, onEventCreate }: 
                     const quarterHourTime = hourValue + quarter * 0.25
 
                     return (
-                      <CalendarCell
+                      <DroppableCell
                         key={`${hour.toString()}-${quarter}`}
+                        id={`week-cell-${day.toISOString()}-${quarterHourTime}`}
+                        date={day}
                         time={quarterHourTime}
                         className={cn(
                           'absolute h-[calc(var(--week-cells-height)/4)] w-full',

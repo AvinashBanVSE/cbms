@@ -6,25 +6,26 @@ import { useEffect } from 'react'
 // Third-party Imports
 import { parseAsString, useQueryState } from 'nuqs'
 
+// Type Imports
+import type { IntegrationsData, MembersData, Session } from '@/types/pages/user-settings-types'
+
 // Component Imports
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import BillingUsage from '@/views/pages/user-settings/billing'
 import UserGeneral from '@/views/pages/user-settings/general'
+import Integrations from '@/views/pages/user-settings/integrations'
+import Members from '@/views/pages/user-settings/members'
+import Notifications from '@/views/pages/user-settings/notifications'
+import Security from '@/views/pages/user-settings/security'
 import Workspace from '@/views/pages/user-settings/workspace'
 
-const tabs = [
-  {
-    name: 'General',
-    value: 'general',
-    content: <UserGeneral />
-  },
-  {
-    name: 'Workspace',
-    value: 'workspace',
-    content: <Workspace />
-  }
-]
+type UserSettingsTabsProps = {
+  membersData: MembersData
+  sessionsData: Session[]
+  integrationsData: IntegrationsData
+}
 
-const UserSettingsTabs = () => {
+const UserSettingsTabs = ({ membersData, sessionsData, integrationsData }: UserSettingsTabsProps) => {
   const [activeSetting, setActiveSetting] = useQueryState(
     'setting',
     parseAsString.withDefault('general').withOptions({
@@ -38,6 +39,44 @@ const UserSettingsTabs = () => {
     setActiveSetting(activeSetting)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const tabs = [
+    {
+      name: 'General',
+      value: 'general',
+      content: <UserGeneral />
+    },
+    {
+      name: 'Notifications',
+      value: 'notifications',
+      content: <Notifications />
+    },
+    {
+      name: 'Workspace',
+      value: 'workspace',
+      content: <Workspace />
+    },
+    {
+      name: 'Integrations',
+      value: 'integrations',
+      content: <Integrations integrationsData={integrationsData} />
+    },
+    {
+      name: 'Members',
+      value: 'members',
+      content: <Members membersData={membersData} />
+    },
+    {
+      name: 'Security',
+      value: 'security',
+      content: <Security sessionsData={sessionsData} />
+    },
+    {
+      name: 'Billing & Usage',
+      value: 'billing',
+      content: <BillingUsage />
+    }
+  ]
 
   return (
     <div className='w-full'>

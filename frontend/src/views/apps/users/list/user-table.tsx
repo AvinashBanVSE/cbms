@@ -1,12 +1,12 @@
 'use client'
 
 // Third-party Imports
-import type { SortingState, Updater } from '@tanstack/react-table'
+import type { RowSelectionState, SortingState, Updater } from '@tanstack/react-table'
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
 
 // Type Imports
-import type { AppUser, UserSorting } from '@/types/apps/user-types'
+import type { AppUser, UserSorting, UserStatus } from '@/types/apps/user-types'
 
 // Component Imports
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -18,12 +18,45 @@ import { userTableColumns } from './user-table-columns'
 export interface UserTableProps {
   paginatedUsers: AppUser[]
   totalPages: number
+  rowSelection: RowSelectionState
   sorting: UserSorting | null
+  onSelectUser: (id: string) => void
   onSortingChange: (sorting: UserSorting | null) => void
+  onEditUser: (userId: string) => void
+  onDeleteUser: (id: string) => void
+  onStatusChange: (id: string, status: UserStatus) => void
 }
 
-export function UserTable({ paginatedUsers, totalPages, sorting, onSortingChange }: UserTableProps) {
+export function UserTable({
+  paginatedUsers,
+  totalPages,
+  rowSelection,
+  sorting,
+  onSelectUser,
+  onSortingChange,
+  onEditUser,
+  onDeleteUser,
+  onStatusChange
+}: UserTableProps) {
   const sortingState: SortingState = sorting ? [sorting] : []
+
+  const handleRowSelectionChange = (updater: Updater<RowSelectionState>) => {
+    const nextSelection = typeof updater === 'function' ? updater(rowSelection) : updater
+    const nextIds = new Set(Object.keys(nextSelection).filter(id => nextSelection[id]))
+    const currentIds = new Set(Object.keys(rowSelection).filter(id => rowSelection[id]))
+
+    currentIds.forEach(id => {
+      if (!nextIds.has(id)) {
+        onSelectUser(id)
+      }
+    })
+
+    nextIds.forEach(id => {
+      if (!currentIds.has(id)) {
+        onSelectUser(id)
+      }
+    })
+  }
 
   const handleSortingChange = (updater: Updater<SortingState>) => {
     const nextSorting = typeof updater === 'function' ? updater(sortingState) : updater
@@ -50,12 +83,19 @@ export function UserTable({ paginatedUsers, totalPages, sorting, onSortingChange
     pageCount: totalPages,
     getCoreRowModel: getCoreRowModel(),
     getRowId: row => row.id,
-    enableRowSelection: false,
+    enableRowSelection: true,
     enableSortingRemoval: false,
     state: {
+      rowSelection,
       sorting: sortingState
     },
-    onSortingChange: handleSortingChange
+    onRowSelectionChange: handleRowSelectionChange,
+    onSortingChange: handleSortingChange,
+    meta: {
+      onEditUser,
+      onDeleteUser,
+      onStatusChange
+    }
   })
 
   return (
@@ -101,7 +141,7 @@ export function UserTable({ paginatedUsers, totalPages, sorting, onSortingChange
       <TableBody>
         {table.getRowModel().rows.length ? (
           table.getRowModel().rows.map(row => (
-            <TableRow key={row.id}>
+            <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
               {row.getVisibleCells().map(cell => (
                 <TableCell key={cell.id} className='h-14 first:w-12.5 first:pl-4 last:w-29 last:px-4'>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}

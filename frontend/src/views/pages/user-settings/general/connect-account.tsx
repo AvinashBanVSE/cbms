@@ -30,12 +30,12 @@ const initialAccounts: ConnectedAccount[] = [
   {
     id: 'google',
     name: 'Google',
-    iconUrl: '/images/brands/google-icon.webp'
+    iconUrl: 'https://cdn.shadcnstudio.com/ss-assets/brand-logo/google-icon.png'
   },
   {
     id: 'slack',
     name: 'Slack',
-    iconUrl: '/images/brands/slack-icon.webp'
+    iconUrl: 'https://cdn.shadcnstudio.com/ss-assets/brand-logo/slack-icon.png'
   }
 ]
 

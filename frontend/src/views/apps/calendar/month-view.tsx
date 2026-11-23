@@ -22,7 +22,8 @@ import type { CalendarEvent } from '@/types/apps/calendar-types'
 
 // Component Imports
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { CalendarCell } from './calendar-cell'
+import { DraggableEvent } from './draggable-event'
+import { DroppableCell } from './droppable-cell'
 import { EventItem } from './event-item'
 
 // Hook Imports
@@ -157,6 +158,7 @@ export function MonthView({ currentDate, events, onEventSelect, onEventCreate }:
               const dayEvents = getEventsForDay(events, day)
               const spanningEvents = getSpanningEventsForDay(events, day)
               const isCurrentMonth = isSameMonth(day, currentDate)
+              const cellId = `month-cell-${day.toISOString()}`
               const allDayEvents = [...spanningEvents, ...dayEvents]
               const allEvents = getAllEventsForDay(events, day)
 
@@ -175,7 +177,12 @@ export function MonthView({ currentDate, events, onEventSelect, onEventCreate }:
                   data-today={isToday(day) || undefined}
                   data-outside-cell={!isCurrentMonth || undefined}
                 >
-                  <CalendarCell className='overflow-visible' onClick={event => handleCellClick(day, event)}>
+                  <DroppableCell
+                    id={cellId}
+                    date={day}
+                    className='overflow-visible'
+                    onClick={event => handleCellClick(day, event)}
+                  >
                     <div className='group-data-today:bg-primary group-data-today:text-primary-foreground mt-1 inline-flex size-6 items-center justify-center rounded-full text-sm'>
                       {format(day, 'd')}
                     </div>
@@ -221,7 +228,7 @@ export function MonthView({ currentDate, events, onEventSelect, onEventCreate }:
                             className='w-full aria-hidden:hidden'
                             aria-hidden={isHidden ? 'true' : undefined}
                           >
-                            <EventItem
+                            <DraggableEvent
                               event={event}
                               view='month'
                               onClick={e => handleEventClick(event, e)}
@@ -289,7 +296,7 @@ export function MonthView({ currentDate, events, onEventSelect, onEventCreate }:
                         </Popover>
                       )}
                     </div>
-                  </CalendarCell>
+                  </DroppableCell>
                 </div>
               )
             })}

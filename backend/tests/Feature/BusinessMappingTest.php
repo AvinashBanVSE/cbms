@@ -28,9 +28,7 @@ final class BusinessMappingTest extends TestCase
         $this->getJson('/api/v1/workspace-access')->assertOk()->assertJsonPath('administration', [])
             ->assertJsonCount(3, 'mapping_contexts')->assertJsonMissing(['id' => $distributor]);
         DB::table('customer_permissions')->insert(['user_id' => $shopUser->id, 'business_id' => $shop, 'action' => 'mapping.verify']);
-        $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(3)->assertJsonMissing(['action' => 'mapping.verify']);
-        $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(3)
-            ->assertJsonPath('0.id', $shop)->assertJsonMissing(['id' => $distributor]);
+        $this->getJson('/api/v1/mapping-contexts')->assertOk()->assertJsonCount(4)->assertJsonPath('0.id', $shop)->assertJsonMissing(['id' => $distributor]);
         DB::table('customer_business_scopes')->where('user_id', $shopUser->id)->delete();
         $this->postJson($endpoint, ['distributor_id' => $distributor])->assertForbidden();
         DB::table('customer_business_scopes')->insert(['user_id' => $shopUser->id, 'business_id' => $shop]);
@@ -191,6 +189,119 @@ final class BusinessMappingTest extends TestCase
         $this->actingAs($shopUser);
         $this->postJson("{$path}/{$pending['id']}/confirm", ['code' => $second, 'distributor_id' => $distributor])
             ->assertOk()->assertJsonPath('state', 'Active');
+    }
+
+    /** §4.2 / §12.3: a Distributor may equally initiate; the roles mirror the Shop flow. */
+    public function test_distributor_may_initiate_and_roles_mirror_the_shop_flow(): void
+    {
+        [$shop, $shopUser, $shopParent] = $this->endpoint('Shop', 'AA1040', ['mapping.verify', 'mapping.confirm']);
+        [$distributor, $distributorUser, $distributorParent] = $this->endpoint('Distributor', 'AA1041', ['mapping.initiate', 'mapping.confirm', 'mapping.end']);
+        $this->assertNotSame($shopParent, $distributorParent);
+
+        $this->actingAs($distributorUser);
+        $start = $this->postJson("/api/v1/distributors/{$distributor}/mappings", ['shop_id' => $shop])
+            ->assertCreated()->assertHeader('Cache-Control', 'no-store, private');
+        $id = $start->json('id');
+        $code = $start->json('code');
+        // First pending stage is named after the Recipient (the Shop).
+        $this->assertDatabaseHas('distributor_shop_mappings', [
+            'id' => $id, 'state' => 'pending_shop', 'initiated_by' => 'Distributor',
+        ]);
+
+        $this->actingAs($shopUser);
+        $verify = "/api/v1/shops/{$shop}/mappings/verify";
+        $second = $this->postJson($verify, ['distributor_id' => $distributor, 'code' => $code])
+            ->assertOk()->assertJsonPath('id', $id)->json('code');
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $id, 'state' => 'pending_distributor']);
+
+        $this->actingAs($distributorUser);
+        $this->postJson("/api/v1/distributors/{$distributor}/mappings/{$id}/confirm", ['shop_id' => $shop, 'code' => $second])
+            ->assertOk()->assertJsonPath('state', 'Active');
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $id, 'state' => 'Active']);
+    }
+
+    /** §4.4.1: the Recipient may reject; the request is final and a fresh one is allowed. */
+    public function test_recipient_may_reject_a_pending_request(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1042', ['mapping.initiate', 'mapping.reject']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1043', ['mapping.reject']);
+        $this->actingAs($shopUser);
+        $pending = $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated()->json();
+
+        // The Initiator may not reject its own request.
+        $this->postJson("/api/v1/businesses/{$shop}/mappings/{$pending['id']}/reject")->assertForbidden();
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $pending['id'], 'state' => 'pending_distributor']);
+
+        $this->actingAs($distributorUser);
+        $this->postJson("/api/v1/businesses/{$distributor}/mappings/{$pending['id']}/reject")
+            ->assertOk()->assertJsonPath('state', 'Rejected');
+        $this->assertDatabaseHas('distributor_shop_mappings', [
+            'id' => $pending['id'], 'state' => 'Rejected', 'code_digest' => null,
+        ]);
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $pending['id'], 'action' => 'mapping.rejected']);
+        // The rejected request never blocks a fresh one for the same pair.
+        $this->actingAs($shopUser);
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated();
+    }
+
+    /** §4.4.2: the Initiator may withdraw; the Recipient may not withdraw. */
+    public function test_initiator_may_withdraw_a_pending_request(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1044', ['mapping.initiate', 'mapping.withdraw']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1045', ['mapping.reject', 'mapping.withdraw']);
+        $this->actingAs($shopUser);
+        $pending = $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated()->json();
+
+        // The Recipient may not withdraw (that is the Initiator's action).
+        $this->actingAs($distributorUser);
+        $this->postJson("/api/v1/businesses/{$distributor}/mappings/{$pending['id']}/withdraw")->assertForbidden();
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $pending['id'], 'state' => 'pending_distributor']);
+
+        $this->actingAs($shopUser);
+        $this->postJson("/api/v1/businesses/{$shop}/mappings/{$pending['id']}/withdraw")
+            ->assertOk()->assertJsonPath('state', 'Withdrawn');
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $pending['id'], 'state' => 'Withdrawn']);
+        $this->assertDatabaseHas('portal_events', ['subject_id' => $pending['id'], 'action' => 'mapping.withdrawn']);
+        // A withdrawn request never blocks a fresh one for the same pair.
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated();
+    }
+
+    /** §4.4: a live Pending/Active pair bars a second concurrent request between the pair. */
+    public function test_a_live_pair_bars_a_second_concurrent_request(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1046', ['mapping.initiate']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1047', ['mapping.initiate']);
+        $this->actingAs($shopUser);
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated();
+
+        // A second request while the first is Pending is refused.
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertConflict();
+
+        // Once Active, still refused.
+        $this->assertDatabaseHas('distributor_shop_mappings', ['shop_id' => $shop, 'distributor_id' => $distributor]);
+        DB::table('distributor_shop_mappings')->where('shop_id', $shop)
+            ->update(['state' => 'Active', 'code_digest' => null, 'expires_at' => null]);
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertConflict();
+
+        // A Terminated mapping never blocks a fresh request (§4.4).
+        DB::table('distributor_shop_mappings')->where('shop_id', $shop)->update(['state' => 'Terminated']);
+        $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated();
+    }
+
+    /** §4.4: a request not decided within its validity expires and blocks verification. */
+    public function test_a_pending_request_expires_past_its_request_validity(): void
+    {
+        [$shop, $shopUser] = $this->endpoint('Shop', 'AA1048', ['mapping.initiate']);
+        [$distributor, $distributorUser] = $this->endpoint('Distributor', 'AA1049', ['mapping.verify']);
+        $this->actingAs($shopUser);
+        $pending = $this->postJson("/api/v1/shops/{$shop}/mappings", ['distributor_id' => $distributor])->assertCreated()->json();
+
+        $this->travel(8)->days();
+        $this->actingAs($distributorUser);
+        $this->postJson("/api/v1/distributors/{$distributor}/mappings/{$pending['id']}/verify", [
+            'shop_id' => $shop, 'code' => $pending['code'],
+        ])->assertUnprocessable();
+        $this->assertDatabaseHas('distributor_shop_mappings', ['id' => $pending['id'], 'state' => 'Expired']);
     }
 
     private function endpoint(string $kind, string $code, array $actions): array

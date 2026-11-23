@@ -28,8 +28,14 @@ final class PermissionCatalogue
     ];
 
     public const MAPPING_BY_BUSINESS = [
-        'Shop' => ['mapping.initiate', 'mapping.confirm', 'mapping.end', 'mapping.history.view'],
-        'Distributor' => ['mapping.verify', 'mapping.end', 'mapping.history.view'],
+        // Both kinds share the same verbs: either may initiate, verify, confirm, end,
+        // reject or withdraw, and either may view history. The role a party holds on a
+        // given request (Initiator vs. Recipient) is derived from the mapping record, so
+        // no privilege asymmetry is encoded here (§4.2).
+        'Shop' => ['mapping.initiate', 'mapping.verify', 'mapping.confirm', 'mapping.end',
+            'mapping.reject', 'mapping.withdraw', 'mapping.history.view'],
+        'Distributor' => ['mapping.initiate', 'mapping.verify', 'mapping.confirm', 'mapping.end',
+            'mapping.reject', 'mapping.withdraw', 'mapping.history.view'],
     ];
 
     /**

@@ -29,6 +29,13 @@ final class AppServiceProvider extends ServiceProvider
     {
         RateLimiter::for('organization-verify', static fn (Request $request): Limit => Limit::perMinute(15)->by($request->ip()));
 
+        // Mapping request lifecycle limiters (§4.2). These are referenced by name from the
+        // mapping routes; each is keyed per user and IP so a burst of secret exchanges is
+        // throttled without leaking one business's pace to another.
+        RateLimiter::for('mapping-initiate', static fn (Request $request): Limit => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+        RateLimiter::for('mapping-verify', static fn (Request $request): Limit => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+        RateLimiter::for('mapping-confirm', static fn (Request $request): Limit => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+
         Event::listen([Login::class, Failed::class, Logout::class], static function (Login|Failed|Logout $event): void {
             $action = match (true) {
                 $event instanceof Login => 'login.succeeded',

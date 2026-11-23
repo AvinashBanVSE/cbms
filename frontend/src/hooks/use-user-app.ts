@@ -1,31 +1,23 @@
 'use client'
 
 // React Imports
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 
 // Type Imports
 import type {
   AppUser,
   UserFilters,
   UserFormData,
-  UserSheetMode,
   UserSortColumn,
   UserSorting,
   UserStatus
 } from '@/types/apps/user-types'
 
-// Data Imports
-import { users as seedUsers } from '@/fake-db/apps/users'
+// Store Imports
+import { useUserStore } from '@/store/use-user-store'
 
-const DEFAULT_FILTERS: UserFilters = {
-  role: 'all',
-  plan: 'all',
-  status: 'all',
-  search: ''
-}
-
-const DEFAULT_ROWS_PER_PAGE = 10
-const DEFAULT_CURRENT_PAGE = 1
+// Util Imports
+import { exportUsersToCSV, exportUsersToExcel, exportUsersToJSON } from '@/utils/export-users-utils'
 
 const filterUsers = (users: AppUser[], filters: UserFilters): AppUser[] => {
   const normalizedSearch = filters.search.trim().toLowerCase()
@@ -87,35 +79,35 @@ const sortUsers = (users: AppUser[], sorting: UserSorting | null): AppUser[] => 
   })
 }
 
-const buildNewUser = (data: UserFormData): AppUser => ({
-  id: crypto.randomUUID(),
-  name: data.name.trim(),
-  email: data.email.trim(),
-  role: data.role,
-  plan: data.plan,
-  status: data.status,
-  billing: 'Manual',
-  company: data.company?.trim() || undefined,
-  country: data.country?.trim() || undefined,
-  contact: data.contact?.trim() || undefined,
-  joinedDate: new Date().toISOString()
-})
-
-const removeIdsFromSelection = (selectedUserIds: string[], ids: string[]): string[] => {
-  const idSet = new Set(ids)
-
-  return selectedUserIds.filter(id => !idSet.has(id))
-}
-
 export function useUserApp() {
-  const [users, setUsers] = useState<AppUser[]>(seedUsers)
-  const [filters, setFiltersState] = useState<UserFilters>(DEFAULT_FILTERS)
-  const [rowsPerPage, setRowsPerPageState] = useState(DEFAULT_ROWS_PER_PAGE)
-  const [currentPage, setCurrentPage] = useState(DEFAULT_CURRENT_PAGE)
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
-  const [sorting, setSorting] = useState<UserSorting | null>(null)
-  const [sheetMode, setSheetMode] = useState<UserSheetMode | null>(null)
-  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const users = useUserStore(state => state.users)
+  const filters = useUserStore(state => state.filters)
+  const rowsPerPage = useUserStore(state => state.rowsPerPage)
+  const currentPage = useUserStore(state => state.currentPage)
+  const selectedUserIds = useUserStore(state => state.selectedUserIds)
+  const sorting = useUserStore(state => state.sorting)
+  const sheetMode = useUserStore(state => state.sheetMode)
+  const editingUserId = useUserStore(state => state.editingUserId)
+  const isImportDialogOpen = useUserStore(state => state.isImportDialogOpen)
+  const addUser = useUserStore(state => state.addUser)
+  const updateUser = useUserStore(state => state.updateUser)
+  const deleteUser = useUserStore(state => state.deleteUser)
+  const deleteUsers = useUserStore(state => state.deleteUsers)
+  const updateUserStatus = useUserStore(state => state.updateUserStatus)
+  const updateUsersStatus = useUserStore(state => state.updateUsersStatus)
+  const setFilters = useUserStore(state => state.setFilters)
+  const setRowsPerPage = useUserStore(state => state.setRowsPerPage)
+  const setCurrentPage = useUserStore(state => state.setCurrentPage)
+  const setSorting = useUserStore(state => state.setSorting)
+  const toggleSelectUser = useUserStore(state => state.toggleSelectUser)
+  const toggleSelectAll = useUserStore(state => state.toggleSelectAll)
+  const clearSelection = useUserStore(state => state.clearSelection)
+  const openAddSheet = useUserStore(state => state.openAddSheet)
+  const openEditSheet = useUserStore(state => state.openEditSheet)
+  const closeSheet = useUserStore(state => state.closeSheet)
+  const openImportDialog = useUserStore(state => state.openImportDialog)
+  const closeImportDialog = useUserStore(state => state.closeImportDialog)
+  const importUsers = useUserStore(state => state.importUsers)
 
   const stats = useMemo(
     () => ({
@@ -160,113 +152,147 @@ export function useUserApp() {
   // Converts string[] → Record<string, boolean> for TanStack controlled selection
   const rowSelection = Object.fromEntries(selectedUserIds.map(id => [id, true]))
 
-  const handleFilterChange = useCallback((nextFilters: Partial<UserFilters>) => {
-    setFiltersState(prev => ({ ...prev, ...nextFilters }))
-    setCurrentPage(DEFAULT_CURRENT_PAGE)
-  }, [])
+  const handleFilterChange = useCallback(
+    (nextFilters: Partial<UserFilters>) => {
+      setFilters(nextFilters)
+    },
+    [setFilters]
+  )
 
-  const handleSearchChange = useCallback((search: string) => {
-    setFiltersState(prev => ({ ...prev, search }))
-    setCurrentPage(DEFAULT_CURRENT_PAGE)
-  }, [])
+  const handleSearchChange = useCallback(
+    (search: string) => {
+      setFilters({ search })
+    },
+    [setFilters]
+  )
 
-  const handleRowsPerPageChange = useCallback((n: number) => {
-    setRowsPerPageState(n)
-    setCurrentPage(DEFAULT_CURRENT_PAGE)
-  }, [])
+  const handleRowsPerPageChange = useCallback(
+    (n: number) => {
+      setRowsPerPage(n)
+    },
+    [setRowsPerPage]
+  )
 
-  const handlePageChange = useCallback((page: number) => {
-    setCurrentPage(page)
-  }, [])
+  const handlePageChange = useCallback(
+    (page: number) => {
+      setCurrentPage(page)
+    },
+    [setCurrentPage]
+  )
 
-  const handleSortingChange = useCallback((nextSorting: UserSorting | null) => {
-    setSorting(nextSorting)
-    setCurrentPage(DEFAULT_CURRENT_PAGE)
-  }, [])
+  const handleSortingChange = useCallback(
+    (nextSorting: UserSorting | null) => {
+      setSorting(nextSorting)
+    },
+    [setSorting]
+  )
 
-  const handleSelectUser = useCallback((id: string) => {
-    setSelectedUserIds(prev => (prev.includes(id) ? prev.filter(selectedId => selectedId !== id) : [...prev, id]))
-  }, [])
+  const handleSelectUser = useCallback(
+    (id: string) => {
+      toggleSelectUser(id)
+    },
+    [toggleSelectUser]
+  )
 
-  const handleSelectAll = useCallback((userIds: string[]) => {
-    setSelectedUserIds(prev => {
-      const allSelected = userIds.length > 0 && userIds.every(id => prev.includes(id))
-
-      if (allSelected) {
-        return removeIdsFromSelection(prev, userIds)
-      }
-
-      return [...new Set([...prev, ...userIds])]
-    })
-  }, [])
+  const handleSelectAll = useCallback(
+    (userIds: string[]) => {
+      toggleSelectAll(userIds)
+    },
+    [toggleSelectAll]
+  )
 
   const handleClearSelection = useCallback(() => {
-    setSelectedUserIds([])
-  }, [])
+    clearSelection()
+  }, [clearSelection])
 
-  const handleAddUser = useCallback((data: UserFormData) => {
-    const newUser = buildNewUser(data)
+  const handleAddUser = useCallback(
+    (data: UserFormData) => {
+      addUser(data)
+    },
+    [addUser]
+  )
 
-    setUsers(prev => [...prev, newUser])
-    setSheetMode(null)
-    setEditingUserId(null)
-  }, [])
+  const handleUpdateUser = useCallback(
+    (id: string, data: Partial<UserFormData>) => {
+      updateUser(id, data)
+    },
+    [updateUser]
+  )
 
-  const handleUpdateUser = useCallback((id: string, data: Partial<UserFormData>) => {
-    setUsers(prev =>
-      prev.map(user =>
-        user.id === id
-          ? {
-              ...user,
-              ...data,
-              name: data.name?.trim() ?? user.name,
-              email: data.email?.trim() ?? user.email,
-              company: data.company?.trim() ?? user.company,
-              country: data.country?.trim() ?? user.country,
-              contact: data.contact?.trim() ?? user.contact
-            }
-          : user
-      )
-    )
-    setSheetMode(null)
-    setEditingUserId(null)
-  }, [])
-
-  const handleDeleteUser = useCallback((id: string) => {
-    setUsers(prev => prev.filter(user => user.id !== id))
-    setSelectedUserIds(prev => removeIdsFromSelection(prev, [id]))
-  }, [])
+  const handleDeleteUser = useCallback(
+    (id: string) => {
+      deleteUser(id)
+    },
+    [deleteUser]
+  )
 
   const handleBulkDelete = useCallback(() => {
-    setUsers(prev => prev.filter(user => !selectedUserIds.includes(user.id)))
-    setSelectedUserIds(prev => removeIdsFromSelection(prev, selectedUserIds))
-  }, [selectedUserIds])
+    deleteUsers(selectedUserIds)
+  }, [deleteUsers, selectedUserIds])
 
-  const handleUpdateStatus = useCallback((id: string, status: UserStatus) => {
-    setUsers(prev => prev.map(user => (user.id === id ? { ...user, status } : user)))
-  }, [])
+  const handleUpdateStatus = useCallback(
+    (id: string, status: UserStatus) => {
+      updateUserStatus(id, status)
+    },
+    [updateUserStatus]
+  )
 
   const handleBulkUpdateStatus = useCallback(
     (status: UserStatus) => {
-      setUsers(prev => prev.map(user => (selectedUserIds.includes(user.id) ? { ...user, status } : user)))
+      updateUsersStatus(selectedUserIds, status)
     },
-    [selectedUserIds]
+    [selectedUserIds, updateUsersStatus]
   )
 
   const handleOpenAddSheet = useCallback(() => {
-    setSheetMode('add')
-    setEditingUserId(null)
-  }, [])
+    openAddSheet()
+  }, [openAddSheet])
 
-  const handleOpenEditSheet = useCallback((userId: string) => {
-    setSheetMode('edit')
-    setEditingUserId(userId)
-  }, [])
+  const handleOpenEditSheet = useCallback(
+    (userId: string) => {
+      openEditSheet(userId)
+    },
+    [openEditSheet]
+  )
 
   const handleCloseSheet = useCallback(() => {
-    setSheetMode(null)
-    setEditingUserId(null)
-  }, [])
+    closeSheet()
+  }, [closeSheet])
+
+  const handleOpenImportDialog = useCallback(() => {
+    openImportDialog()
+  }, [openImportDialog])
+
+  const handleCloseImportDialog = useCallback(() => {
+    closeImportDialog()
+  }, [closeImportDialog])
+
+  const handleImportUsers = useCallback(
+    (incoming: Partial<AppUser>[]) => {
+      importUsers(incoming)
+    },
+    [importUsers]
+  )
+
+  const getExportUsers = useCallback((): AppUser[] => {
+    if (selectedUserIds.length > 0) {
+      return filteredUsers.filter(user => selectedUserIds.includes(user.id))
+    }
+
+    return filteredUsers
+  }, [filteredUsers, selectedUserIds])
+
+  const handleExportCsv = useCallback(() => {
+    exportUsersToCSV(getExportUsers())
+  }, [getExportUsers])
+
+  const handleExportExcel = useCallback(() => {
+    exportUsersToExcel(getExportUsers())
+  }, [getExportUsers])
+
+  const handleExportJson = useCallback(() => {
+    exportUsersToJSON(getExportUsers())
+  }, [getExportUsers])
 
   return {
     users,
@@ -288,6 +314,7 @@ export function useUserApp() {
     sorting,
     sheetMode,
     editingUser,
+    isImportDialogOpen,
     handleFilterChange,
     handleSearchChange,
     handleRowsPerPageChange,
@@ -304,6 +331,12 @@ export function useUserApp() {
     handleBulkUpdateStatus,
     handleOpenAddSheet,
     handleOpenEditSheet,
-    handleCloseSheet
+    handleCloseSheet,
+    handleOpenImportDialog,
+    handleCloseImportDialog,
+    handleImportUsers,
+    handleExportCsv,
+    handleExportExcel,
+    handleExportJson
   }
 }

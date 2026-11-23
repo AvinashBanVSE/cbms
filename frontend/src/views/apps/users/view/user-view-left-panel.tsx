@@ -39,9 +39,12 @@ const formatCompactNumber = (value: number | undefined): string => {
 export interface UserViewLeftPanelProps {
   user: AppUser
   onEdit: () => void
+  onToggleSuspend: () => void
 }
 
-export function UserViewLeftPanel({ user, onEdit }: UserViewLeftPanelProps) {
+export function UserViewLeftPanel({ user, onEdit, onToggleSuspend }: UserViewLeftPanelProps) {
+  const isSuspended = user.status === 'Suspended'
+
   const detailRows = [
     { label: 'Username', value: user.username ?? '—' },
     { label: 'Email', value: user.email },
@@ -54,7 +57,7 @@ export function UserViewLeftPanel({ user, onEdit }: UserViewLeftPanelProps) {
   ] as const
 
   return (
-    <Card className='overflow-y-auto lg:sticky lg:top-20 lg:h-[calc(100dvh-7.5rem)]'>
+    <Card className='overflow-y-auto lg:sticky lg:top-22 lg:h-[calc(100dvh-7.5rem)]'>
       <CardContent className='space-y-6 pt-6'>
         <div className='flex flex-col items-center text-center'>
           <Avatar className='size-24'>
@@ -105,8 +108,9 @@ export function UserViewLeftPanel({ user, onEdit }: UserViewLeftPanelProps) {
           <Button
             variant='outline'
             className='text-destructive hover:bg-destructive/10 hover:text-destructive sm:flex-1'
+            onClick={onToggleSuspend}
           >
-            Suspend
+            {isSuspended ? 'Activate' : 'Suspend'}
           </Button>
         </div>
       </CardContent>

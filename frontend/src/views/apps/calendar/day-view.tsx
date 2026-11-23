@@ -20,7 +20,8 @@ import {
 import type { CalendarEvent } from '@/types/apps/calendar-types'
 
 // Component Imports
-import { CalendarCell } from './calendar-cell'
+import { DraggableEvent } from './draggable-event'
+import { DroppableCell } from './droppable-cell'
 import { EventItem } from './event-item'
 
 // Hook Imports
@@ -256,11 +257,12 @@ export function DayView({ currentDate, events, onEventSelect, onEventCreate }: D
               }}
             >
               <div className='h-full w-full'>
-                <EventItem
+                <DraggableEvent
                   event={positionedEvent.event}
                   view='day'
                   onClick={e => handleEventClick(positionedEvent.event, e)}
                   showTime
+                  height={positionedEvent.height}
                 />
               </div>
             </div>
@@ -293,8 +295,10 @@ export function DayView({ currentDate, events, onEventSelect, onEventCreate }: D
                   const quarterHourTime = hourValue + quarter * 0.25
 
                   return (
-                    <CalendarCell
+                    <DroppableCell
                       key={`${hour.toString()}-${quarter}`}
+                      id={`day-cell-${currentDate.toISOString()}-${quarterHourTime}`}
+                      date={currentDate}
                       time={quarterHourTime}
                       className={cn(
                         'absolute h-[calc(var(--week-cells-height)/4)] w-full',

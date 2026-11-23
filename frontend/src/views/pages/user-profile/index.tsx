@@ -1,6 +1,3 @@
-// React Imports
-import { Suspense } from 'react'
-
 // Third-party Imports
 import { BriefcaseBusinessIcon, CalendarDaysIcon, MapPinIcon, UserRoundCheckIcon } from 'lucide-react'
 
@@ -18,7 +15,7 @@ const UserProfile = () => {
         <Card className='py-0 pb-6'>
           <div className='bg-muted relative h-44 overflow-hidden'>
             <div className='absolute inset-0'>
-              <BackgroundRippleEffect cellSize={45} rows={8} activeSquares={18} cols={45} />
+              <BackgroundRippleEffect cellSize={45} rows={8} activeSquares={18} />
             </div>
           </div>
 
@@ -54,9 +51,7 @@ const UserProfile = () => {
           </CardContent>
         </Card>
       </div>
-      <Suspense>
-        <UserProfileTabs />
-      </Suspense>
+      <UserProfileTabs />
     </div>
   )
 }

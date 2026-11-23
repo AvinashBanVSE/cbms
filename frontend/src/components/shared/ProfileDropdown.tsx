@@ -1,20 +1,27 @@
 // Next Imports
-import { LogInIcon } from 'lucide-react'
-
-import Link from '@/components/navigation/OpaqueLink'
+import Link from 'next/link'
 
 // Third-party Imports
+import { CircleQuestionMarkIcon, DollarSignIcon, LogOutIcon, SettingsIcon, UserIcon } from 'lucide-react'
 
 // Component Imports
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 
 const STATIC_USER = {
-  fullName: 'Portal user',
-  email: 'Account details are available after sign-in',
-  imageUrl: '',
-  initials: 'PU'
+  fullName: 'John Doe',
+  email: 'john.doe@example.com',
+  imageUrl: '/images/avatars/avatar-1.webp',
+  initials: 'JD'
 }
 
 const ProfileDropdown = () => {
@@ -30,22 +37,59 @@ const ProfileDropdown = () => {
         <span className='ring-card absolute right-0 bottom-0 block size-2 rounded-full bg-green-600 ring-2' />
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-60'>
-        <DropdownMenuLabel className='flex items-center gap-4 px-2 py-2.5 font-normal'>
-          <div className='relative'>
-            <Avatar className='size-10'>
-              <AvatarImage src={STATIC_USER.imageUrl} alt={STATIC_USER.fullName} />
-              <AvatarFallback>{STATIC_USER.initials}</AvatarFallback>
-            </Avatar>
-          </div>
-          <div className='flex flex-1 flex-col items-start'>
-            <span className='text-foreground text-base font-semibold'>{STATIC_USER.fullName}</span>
-            <span className='text-muted-foreground text-sm'>{STATIC_USER.email}</span>
-          </div>
-        </DropdownMenuLabel>
-        <DropdownMenuItem render={<Link href='/login' />}>
-          <LogInIcon />
-          <span>Sign in</span>
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className='flex items-center gap-4 px-2 py-2.5 font-normal'>
+            <div className='relative'>
+              <Avatar className='size-10'>
+                <AvatarImage src={STATIC_USER.imageUrl} alt={STATIC_USER.fullName} />
+                <AvatarFallback>{STATIC_USER.initials}</AvatarFallback>
+              </Avatar>
+              <span className='ring-card absolute right-0 bottom-0 block size-2 rounded-full bg-green-600 ring-2' />
+            </div>
+            <div className='flex flex-1 flex-col items-start'>
+              <span className='text-foreground text-base font-semibold'>{STATIC_USER.fullName}</span>
+              <span className='text-muted-foreground text-sm'>{STATIC_USER.email}</span>
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          <DropdownMenuItem>
+            <Link href='/pages/user-profile?view=profile' className='flex flex-1 items-center gap-2'>
+              <UserIcon />
+              <span>My Account</span>
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem>
+            <Link href='/pages/user-settings?setting=general' className='flex flex-1 items-center gap-2'>
+              <SettingsIcon />
+              <span>Settings</span>
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem>
+            <Link href='/pages/pricing' className='flex flex-1 items-center gap-2'>
+              <DollarSignIcon />
+              <span>Pricing</span>
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem>
+            <Link href='/pages/faq' className='flex flex-1 items-center gap-2'>
+              <CircleQuestionMarkIcon />
+              <span>FAQ</span>
+            </Link>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          <DropdownMenuItem variant='destructive' render={<Link href='/pages/auth/login-v3' />}>
+            <LogOutIcon />
+            <span>Sign out</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

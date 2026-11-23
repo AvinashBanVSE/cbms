@@ -14,7 +14,15 @@ import { MAIL_LABEL_NAV_ITEMS, MAIL_LABEL_STYLES } from '@/configs/mailConfig'
 // Util Imports
 import { cn } from '@/lib/utils'
 
-export const LabelManager = ({ labels }: { labels: EmailLabel[] }) => {
+export const LabelManager = ({
+  emailId,
+  labels,
+  onToggleLabel
+}: {
+  emailId: string
+  labels: EmailLabel[]
+  onToggleLabel: (id: string, label: EmailLabel) => void
+}) => {
   // Props
 
   return (
@@ -40,6 +48,7 @@ export const LabelManager = ({ labels }: { labels: EmailLabel[] }) => {
               size='sm'
               title={labelItem.label}
               className='w-full justify-start gap-2'
+              onClick={() => onToggleLabel(emailId, labelItem.id)}
             >
               <span className={cn('size-2.5 shrink-0 rounded-full', labelStyle?.color)} />
               <span className='flex-1 text-left'>{labelItem.label}</span>

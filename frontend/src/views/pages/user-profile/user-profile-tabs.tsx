@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import ConnectionsCard from '@/views/pages/user-profile/connections'
 import Profile from '@/views/pages/user-profile/profile'
+import TeamsCard from '@/views/pages/user-profile/teams'
+import ProjectsCard from './projects'
 
 const UserProfileTabs = () => {
   const [activeView, setActiveView] = useQueryState(
@@ -32,6 +34,16 @@ const UserProfileTabs = () => {
       name: 'Profile',
       value: 'profile',
       content: <Profile />
+    },
+    {
+      name: 'Teams',
+      value: 'teams',
+      content: <TeamsCard />
+    },
+    {
+      name: 'Projects',
+      value: 'projects',
+      content: <ProjectsCard />
     },
     {
       name: 'Connections',

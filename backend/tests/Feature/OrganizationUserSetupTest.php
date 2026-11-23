@@ -37,7 +37,7 @@ final class OrganizationUserSetupTest extends TestCase
         $this->postJson("{$url}/credential-policy", ['mode' => $mode])->assertOk();
 
         $user = ['email' => 'authorized@example.test', 'business_id' => $shop, 'actions' => ['mapping.initiate']];
-        $this->postJson("{$url}/organization-users", [...$user, 'actions' => ['mapping.verify']])->assertUnprocessable();
+        $this->postJson("{$url}/organization-users", [...$user, 'actions' => ['mapping.delete']])->assertUnprocessable();
         $this->postJson("{$url}/organization-users", $user)->assertServiceUnavailable();
 
         $transport = new ArrayTransport;
@@ -144,7 +144,7 @@ final class OrganizationUserSetupTest extends TestCase
         $this->getJson($endpoint)->assertUnauthorized();
         $this->actingAs($administrator);
         $this->getJson($endpoint)->assertExactJson(['associated' => false, 'in_scope' => false, 'actions' => []]);
-        $this->postJson($endpoint, [...$full, 'actions' => ['mapping.verify']])->assertUnprocessable();
+        $this->postJson($endpoint, [...$full, 'actions' => ['mapping.delete']])->assertUnprocessable();
         $this->postJson($endpoint, $full)->assertExactJson($full);
         $this->postJson($endpoint, $full)->assertExactJson($full);
         $this->assertDatabaseCount('portal_events', 1);
@@ -239,7 +239,7 @@ final class OrganizationUserSetupTest extends TestCase
         $delegate = User::where('code', 'AA4012')->firstOrFail();
         $this->getJson($roles)->assertUnauthorized();
         $this->actingAs($administrator);
-        $this->postJson($roles, [...$definition, 'actions' => ['mapping.verify']])->assertUnprocessable();
+        $this->postJson($roles, [...$definition, 'actions' => ['mapping.delete']])->assertUnprocessable();
         $role = $this->postJson($roles, $definition)->assertCreated()->json('id');
         $this->postJson($roles, $definition)->assertConflict();
         $this->getJson($roles)->assertOk()->assertJsonPath('data.0.actions', ['mapping.end']);

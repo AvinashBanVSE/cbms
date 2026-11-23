@@ -10,6 +10,11 @@ export const MAIL_CURRENT_USER = {
   avatar: undefined as string | undefined
 }
 
+export const MAIL_COMPOSE_SESSION = {
+  OPEN: 'compose-open',
+  CLOSED: 'compose-closed'
+} as const
+
 export type MailNavStatusItem = {
   id: EmailStatus
   label: string
@@ -56,6 +61,22 @@ export const MAIL_LABEL_STYLES: MailNavLabelStyle[] = [
   { id: 'shopping', label: 'Shopping', color: 'bg-lime-500' },
   { id: 'promotions', label: 'Promotions', color: 'bg-pink-500' }
 ]
+
+export const deriveRecipientEmailAddress = (recipient: string) => {
+  if (recipient.includes('@')) {
+    return recipient
+  }
+
+  return `${recipient.toLowerCase().replace(/\s+/g, '.')}@example.com`
+}
+
+export const getEmailPreviewText = (body: string, maxLength = 80) => {
+  if (!body) {
+    return 'Working on a draft...'
+  }
+
+  return body.slice(0, maxLength) + (body.length > maxLength ? '...' : '')
+}
 
 export const getInitialsFromName = (name: string) => {
   return name

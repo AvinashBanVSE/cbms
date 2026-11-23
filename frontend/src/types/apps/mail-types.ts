@@ -39,4 +39,15 @@ export type MailData = {
 
 export type MailFilterTab = 'all' | 'unread'
 
+export type MailSortOrder = 'default' | 'newest' | 'oldest'
+
 export type MailNavType = 'status' | 'label'
+
+export type ComposeEmailPayload = {
+  to: string
+  toEmail: string
+  cc?: string
+  bcc?: string
+  subject: string
+  body: string
+}

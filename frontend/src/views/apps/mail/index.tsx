@@ -20,9 +20,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import MailNav from './mail-nav'
 import MailList from './mail-list'
 import MailDisplay from './mail-display'
+import MailCompose from './mail-compose'
 
 // Config Imports
-import { MAIL_LABEL_NAV_ITEMS, MAIL_STATUS_NAV_ITEMS } from '@/configs/mailConfig'
+import { MAIL_COMPOSE_SESSION, MAIL_LABEL_NAV_ITEMS, MAIL_STATUS_NAV_ITEMS } from '@/configs/mailConfig'
 
 // Hook Imports
 import { useMailApp } from '@/hooks/use-mail-app'
@@ -42,16 +43,32 @@ const MailApp = () => {
     activeNavType,
     filterTab,
     searchQuery,
+    isComposeOpen,
     statusCounts,
     labelCounts,
     visibleEmails,
     selectedEmail,
     unreadCount,
     setFilterTab,
+    setSortOrder,
     setSearchQuery,
+    setIsComposeOpen,
     handleStatusChange,
     handleLabelChange,
-    handleEmailSelect
+    handleEmailSelect,
+    handleToggleStar,
+    handleMarkRead,
+    handleArchive,
+    handleMoveToTrash,
+    handleMoveToSpam,
+    handleMarkNotSpam,
+    handleRestoreToInbox,
+    handlePermanentDelete,
+    handleSendDraft,
+    handleToggleLabel,
+    handleSendReply,
+    handleComposeSend,
+    handleComposeSaveDraft
   } = useMailApp()
 
   const statusNavItems = useMemo(
@@ -82,7 +99,18 @@ const MailApp = () => {
 
   // Vars
   const mailDisplayProps = {
-    email: selectedEmail
+    email: selectedEmail,
+    onToggleStar: handleToggleStar,
+    onMarkRead: handleMarkRead,
+    onArchive: handleArchive,
+    onMoveToTrash: handleMoveToTrash,
+    onMoveToSpam: handleMoveToSpam,
+    onMarkNotSpam: handleMarkNotSpam,
+    onRestoreToInbox: handleRestoreToInbox,
+    onPermanentDelete: handlePermanentDelete,
+    onSendDraft: handleSendDraft,
+    onToggleLabel: handleToggleLabel,
+    onSendReply: handleSendReply
   }
 
   const handleEmailSelectWithMobile = (email: Email) => {
@@ -101,7 +129,7 @@ const MailApp = () => {
           >
             <ResizablePanel defaultSize='15%' minSize='14%' className='bg-card flex flex-col'>
               <div className='p-3'>
-                <Button className='w-full'>
+                <Button className='w-full' onClick={() => setIsComposeOpen(true)}>
                   <MailIcon className='mr-2 size-4' />
                   Compose
                 </Button>
@@ -161,9 +189,9 @@ const MailApp = () => {
                       <ArrowDownUpIcon className='size-4' />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>
-                      <DropdownMenuItem>Default order</DropdownMenuItem>
-                      <DropdownMenuItem>Newest first</DropdownMenuItem>
-                      <DropdownMenuItem>Oldest first</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSortOrder('default')}>Default order</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSortOrder('newest')}>Newest first</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSortOrder('oldest')}>Oldest first</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -247,9 +275,9 @@ const MailApp = () => {
                     <ArrowDownUpIcon className='size-4' />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end'>
-                    <DropdownMenuItem>Default order</DropdownMenuItem>
-                    <DropdownMenuItem>Newest first</DropdownMenuItem>
-                    <DropdownMenuItem>Oldest first</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortOrder('default')}>Default order</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortOrder('newest')}>Newest first</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortOrder('oldest')}>Oldest first</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -267,7 +295,7 @@ const MailApp = () => {
                 type='button'
                 variant='ghost'
                 size='sm'
-                className='absolute top-1.5 left-2 p-0 lg:hidden'
+                className='absolute top-1.5 left-2 p-0 md:hidden'
                 onClick={() => setMobileView('list')}
               >
                 <ChevronLeftIcon className='size-4' />
@@ -282,7 +310,13 @@ const MailApp = () => {
       <Sheet open={isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
         <SheetContent side='left' showCloseButton={false}>
           <div className='border-border border-b p-3'>
-            <Button className='w-full'>
+            <Button
+              className='w-full'
+              onClick={() => {
+                setIsComposeOpen(true)
+                setIsMobileSidebarOpen(false)
+              }}
+            >
               <MailIcon />
               Compose
             </Button>
@@ -306,6 +340,14 @@ const MailApp = () => {
           />
         </SheetContent>
       </Sheet>
+
+      <MailCompose
+        key={isComposeOpen ? MAIL_COMPOSE_SESSION.OPEN : MAIL_COMPOSE_SESSION.CLOSED}
+        open={isComposeOpen}
+        onOpenChange={setIsComposeOpen}
+        onSend={handleComposeSend}
+        onSaveDraft={handleComposeSaveDraft}
+      />
     </>
   )
 }

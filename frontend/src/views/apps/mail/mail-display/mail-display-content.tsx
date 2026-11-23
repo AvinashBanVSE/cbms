@@ -1,7 +1,7 @@
 'use client'
 
 // React Imports
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 // Third-party Imports
 import {
@@ -21,6 +21,7 @@ import {
 
 // Type Imports
 import type { Email, ThreadMessage } from '@/types/apps/mail-types'
+import type { MailDisplayProps } from './index'
 
 // Component Imports
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -42,10 +43,26 @@ import { cn } from '@/lib/utils'
 
 const LABEL_MANAGE_STATUSES = new Set<Email['status']>(['inbox', 'sent', 'archive'])
 
-export const MailDisplayContent = ({ email }: { email: Email }) => {
+export const MailDisplayContent = ({
+  email,
+  onToggleStar,
+  onMarkRead,
+  onArchive,
+  onMoveToTrash,
+  onMoveToSpam,
+  onMarkNotSpam,
+  onRestoreToInbox,
+  onPermanentDelete,
+  onSendDraft,
+  onToggleLabel,
+  onSendReply
+}: Omit<MailDisplayProps, 'email'> & { email: Email }) => {
   // States
   const [replyMessageBody, setReplyMessageBody] = useState(() => (email.status === 'drafts' ? email.body : ''))
   const [isEarlierMessagesExpanded, setIsEarlierMessagesExpanded] = useState(false)
+
+  // Refs
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Vars
   const threadMessages = email.thread.messages
@@ -60,6 +77,15 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
   const recipientName = isSent || isDraft ? (email.to ?? 'Unknown') : email.from
   const recipientEmail = isSent || isDraft ? (email.toEmail ?? '') : email.fromEmail
 
+  const handleReplySubmit = () => {
+    if (!replyMessageBody.trim()) {
+      return
+    }
+
+    onSendReply(email.id, replyMessageBody)
+    setReplyMessageBody('')
+  }
+
   const getThreadMessageAvatar = (message: ThreadMessage) => {
     if (message.isFromMe) {
       return MAIL_CURRENT_USER.avatar
@@ -72,13 +98,29 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
     return undefined
   }
 
+  const handleFooterSubmit = () => {
+    if (isDraft) {
+      if (!replyMessageBody.trim()) {
+        return
+      }
+
+      onSendDraft(email.id, replyMessageBody)
+
+      return
+    }
+
+    handleReplySubmit()
+  }
+
   return (
     <div className='flex h-full min-h-0 flex-col'>
-      <div className='flex items-center gap-1 p-1 max-lg:justify-end lg:h-15 lg:p-3'>
-        <div className='hidden items-center lg:flex'>
+      <div className='flex items-center gap-1 p-1 max-md:justify-end md:h-15 md:p-3'>
+        <div className='hidden items-center md:flex'>
           {(email.status === 'inbox' || email.status === 'sent' || email.status === 'drafts') && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant='ghost' size='icon' title='Archive' />}>
+              <TooltipTrigger
+                render={<Button variant='ghost' size='icon' title='Archive' onClick={() => onArchive(email.id)} />}
+              >
                 <Archive className='size-4' />
                 <span className='sr-only'>Archive</span>
               </TooltipTrigger>
@@ -88,7 +130,11 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
 
           {email.status === 'inbox' && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant='ghost' size='icon' title='Move to spam' />}>
+              <TooltipTrigger
+                render={
+                  <Button variant='ghost' size='icon' title='Move to spam' onClick={() => onMoveToSpam(email.id)} />
+                }
+              >
                 <ShieldAlert className='size-4' />
                 <span className='sr-only'>Move to spam</span>
               </TooltipTrigger>
@@ -98,7 +144,9 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
 
           {email.status === 'spam' && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant='ghost' size='icon' title='Not spam' />}>
+              <TooltipTrigger
+                render={<Button variant='ghost' size='icon' title='Not spam' onClick={() => onMarkNotSpam(email.id)} />}
+              >
                 <ShieldCheck className='size-4' />
                 <span className='sr-only'>Not spam</span>
               </TooltipTrigger>
@@ -108,7 +156,16 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
 
           {(email.status === 'trash' || email.status === 'archive') && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant='ghost' size='icon' title='Restore to inbox' />}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    title='Restore to inbox'
+                    onClick={() => onRestoreToInbox(email.id)}
+                  />
+                }
+              >
                 <Inbox className='size-4' />
                 <span className='sr-only'>Restore to inbox</span>
               </TooltipTrigger>
@@ -122,7 +179,11 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
             email.status === 'spam' ||
             email.status === 'archive') && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant='ghost' size='icon' title='Move to trash' />}>
+              <TooltipTrigger
+                render={
+                  <Button variant='ghost' size='icon' title='Move to trash' onClick={() => onMoveToTrash(email.id)} />
+                }
+              >
                 <Trash2 className='size-4' />
                 <span className='sr-only'>Move to trash</span>
               </TooltipTrigger>
@@ -139,6 +200,7 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
                     size='icon'
                     title='Delete permanently'
                     className='text-destructive hover:text-destructive'
+                    onClick={() => onPermanentDelete(email.id)}
                   />
                 }
               >
@@ -149,13 +211,22 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
             </Tooltip>
           )}
 
-          {canManageLabels && <LabelManager labels={email.labels} />}
+          {canManageLabels && <LabelManager emailId={email.id} labels={email.labels} onToggleLabel={onToggleLabel} />}
         </div>
 
-        <Separator orientation='vertical' className='hidden h-6 data-vertical:self-center lg:block' />
-        <div className='hidden min-w-0 flex-1 items-center gap-2 lg:flex'>
+        <Separator orientation='vertical' className='hidden h-6 data-vertical:self-center md:block' />
+        <div className='hidden min-w-0 flex-1 items-center gap-2 md:flex'>
           <Tooltip>
-            <TooltipTrigger render={<Button variant='ghost' size='icon' title={email.isStarred ? 'Unstar' : 'Star'} />}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  title={email.isStarred ? 'Unstar' : 'Star'}
+                  onClick={() => onToggleStar(email.id)}
+                />
+              }
+            >
               <StarIcon className={cn('size-4', email.isStarred && 'fill-primary text-primary')} />
               <span className='sr-only'>{email.isStarred ? 'Unstar' : 'Star'}</span>
             </TooltipTrigger>
@@ -179,7 +250,16 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
 
         <div className='flex shrink-0 items-center gap-0.5'>
           <Tooltip>
-            <TooltipTrigger render={<Button variant='ghost' size='icon' disabled={isSent} />}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  disabled={isSent}
+                  onClick={() => replyTextareaRef.current?.focus()}
+                />
+              }
+            >
               <Reply className='size-4' />
               <span className='sr-only'>Reply</span>
             </TooltipTrigger>
@@ -201,29 +281,45 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
           </Tooltip>
           <Separator orientation='vertical' className='mx-1 h-6 data-vertical:self-center' />
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant='ghost' size='icon' />}>
+            <DropdownMenuTrigger render={<Button variant='ghost' size='icon' disabled={!email} />}>
               <MoreVertical className='size-4' />
               <span className='sr-only'>More</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end'>
-              <DropdownMenuItem>{email.isRead ? 'Mark as unread' : 'Mark as read'}</DropdownMenuItem>
-              <DropdownMenuItem>{email.isStarred ? 'Unstar thread' : 'Star thread'}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onMarkRead(email.id, !email.isRead)}>
+                {email.isRead ? 'Mark as unread' : 'Mark as read'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onToggleStar(email.id)}>
+                {email.isStarred ? 'Unstar thread' : 'Star thread'}
+              </DropdownMenuItem>
               {(email.status === 'inbox' || email.status === 'sent' || email.status === 'drafts') && (
-                <DropdownMenuItem>Archive</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onArchive(email.id)}>Archive</DropdownMenuItem>
               )}
-              {email.status === 'inbox' && <DropdownMenuItem>Move to spam</DropdownMenuItem>}
-              {email.status === 'spam' && <DropdownMenuItem>Not spam</DropdownMenuItem>}
+              {email.status === 'inbox' && (
+                <DropdownMenuItem onClick={() => onMoveToSpam(email.id)}>Move to spam</DropdownMenuItem>
+              )}
+              {email.status === 'spam' && (
+                <DropdownMenuItem onClick={() => onMarkNotSpam(email.id)}>Not spam</DropdownMenuItem>
+              )}
               {(email.status === 'trash' || email.status === 'archive') && (
-                <DropdownMenuItem>Restore to inbox</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onRestoreToInbox(email.id)}>Restore to inbox</DropdownMenuItem>
               )}
-              {email.status === 'drafts' && <DropdownMenuItem>Send draft</DropdownMenuItem>}
+              {email.status === 'drafts' && (
+                <DropdownMenuItem onClick={() => onSendDraft(email.id)}>Send draft</DropdownMenuItem>
+              )}
               {(email.status === 'inbox' ||
                 email.status === 'sent' ||
                 email.status === 'drafts' ||
                 email.status === 'spam' ||
-                email.status === 'archive') && <DropdownMenuItem variant='destructive'>Move to trash</DropdownMenuItem>}
+                email.status === 'archive') && (
+                <DropdownMenuItem variant='destructive' onClick={() => onMoveToTrash(email.id)}>
+                  Move to trash
+                </DropdownMenuItem>
+              )}
               {(email.status === 'spam' || email.status === 'trash') && (
-                <DropdownMenuItem variant='destructive'>Delete permanently</DropdownMenuItem>
+                <DropdownMenuItem variant='destructive' onClick={() => onPermanentDelete(email.id)}>
+                  Delete permanently
+                </DropdownMenuItem>
               )}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -296,9 +392,15 @@ export const MailDisplayContent = ({ email }: { email: Email }) => {
         </div>
 
         <div className='border-border mt-auto border-t p-3'>
-          <form onSubmit={event => event.preventDefault()}>
+          <form
+            onSubmit={event => {
+              event.preventDefault()
+              handleFooterSubmit()
+            }}
+          >
             <div className='border-border bg-muted/20 overflow-hidden rounded-lg border'>
               <Textarea
+                ref={replyTextareaRef}
                 className='resize-none rounded-none border-0 bg-transparent p-2 text-sm shadow-none focus-visible:ring-0 max-md:min-h-10 md:px-4 md:py-3'
                 placeholder={isDraft ? 'Edit your draft...' : `Reply to ${recipientName}...`}
                 value={replyMessageBody}

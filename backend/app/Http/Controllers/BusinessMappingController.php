@@ -17,23 +17,40 @@ final class BusinessMappingController
 {
     public function __construct(private readonly CustomerBusinessAccess $access, private readonly MappingGate $gate) {}
 
-    public function initiate(Request $request, string $shop): JsonResponse
+    /**
+     * Either a Shop or a Distributor may open a request (§4.2). The two entry routes share
+     * this path: the acting side is the Initiator, the other is the Recipient, and the
+     * first pending stage is named after the Recipient (the side that owes the next decision).
+     */
+    public function initiate(Request $request, string $business): JsonResponse
     {
-        $actor = $this->access->requirePermission($shop, 'Shop', 'mapping.initiate');
+        abort_unless(Auth::check(), 401);
+        $kind = $this->mappingKind($business);
+        $actor = $this->access->requirePermission($business, $kind, 'mapping.initiate');
+        $counterparty = $this->counterpartyKind($kind);
+        // Endpoint-based request-field convention, shared with verify/confirm.
+        $counterpartyField = $kind === 'Shop' ? 'distributor_id' : 'shop_id';
         $input = $request->validate([
-            'distributor_id' => 'required|uuid',
+            $counterpartyField => 'required|uuid',
             'mapping_type' => 'sometimes|required|in:distributor_shop',
         ]);
-        abort_unless(DB::table('business_identities')->where('id', $input['distributor_id'])->where('kind', 'Distributor')->exists(), 422);
+        $counterpartyId = $input[$counterpartyField];
+        abort_unless(DB::table('business_identities')->where('id', $counterpartyId)->where('kind', $counterparty)->exists(), 422);
+        $shop = $kind === 'Shop' ? $business : $counterpartyId;
+        $distributor = $kind === 'Distributor' ? $business : $counterpartyId;
 
-        return DB::transaction(function () use ($shop, $actor, $input): JsonResponse {
-            $this->requireActiveEndpoints($shop, $input['distributor_id']);
+        return DB::transaction(function () use ($input, $shop, $distributor, $counterparty, $business, $actor, $kind): JsonResponse {
+            $this->requireActiveEndpoints($shop, $distributor);
+            $this->requireFreshPair($shop, $distributor);
             $id = Str::uuid7()->toString();
             $secret = bin2hex(random_bytes(16));
             DB::table('distributor_shop_mappings')->insert([
-                'id' => $id, 'shop_id' => $shop, 'distributor_id' => $input['distributor_id'],
+                'id' => $id, 'shop_id' => $shop, 'distributor_id' => $distributor,
                 'mapping_type' => $input['mapping_type'] ?? 'distributor_shop',
-                'state' => 'pending_distributor', ...$this->codeFields($secret),
+                'initiated_by' => $kind,
+                'state' => 'pending_'.strtolower($counterparty),
+                ...$this->codeFields($secret),
+                'request_expires_at' => now()->addDays((int) config('portal.mapping_request_days')),
             ]);
             $this->record($id, $actor, 'initiated');
 
@@ -41,44 +58,139 @@ final class BusinessMappingController
         });
     }
 
-    public function verifyShop(Request $request, string $distributor, ?string $mapping = null): JsonResponse
+    /**
+     * The Recipient verifies the Initiator's first code (§12.3.2). This opens the second
+     * stage, named after the Initiator, who then owes the confirming code.
+     */
+    public function verify(Request $request, string $business, ?string $mapping = null): JsonResponse
     {
-        $actor = $this->access->requirePermission($distributor, 'Distributor', 'mapping.verify');
-        $input = $request->validate(['shop_id' => 'required|uuid', 'code' => 'required|string|size:32']);
+        abort_unless(Auth::check(), 401);
+        $kind = $this->mappingKind($business);
+        $actor = $this->access->requirePermission($business, $kind, 'mapping.verify');
+        $counterparty = $this->counterpartyKind($kind);
+        // Convention: a Shop endpoint addresses the other side as distributor_id, a
+        // Distributor endpoint as shop_id, regardless of which side initiated.
+        $input = $request->validate([
+            $kind === 'Shop' ? 'distributor_id' : 'shop_id' => 'required|uuid',
+            'code' => 'required|string|size:32',
+        ]);
+        // The acting Recipient is `business`; the Initiator is the counterparty.
+        $counterpartyId = $input[$kind === 'Shop' ? 'distributor_id' : 'shop_id'];
+        $shop = $kind === 'Shop' ? $business : $counterpartyId;
+        $distributor = $kind === 'Distributor' ? $business : $counterpartyId;
 
-        return DB::transaction(function () use ($mapping, $distributor, $actor, $input): JsonResponse {
+        return DB::transaction(function () use ($input, $shop, $distributor, $kind, $counterparty, $mapping, $actor): JsonResponse {
             $secret = bin2hex(random_bytes(16));
-            $id = $this->consume($mapping, $input['shop_id'], $distributor, 'pending_distributor', $input['code'], [
-                'state' => 'pending_shop', ...$this->codeFields($secret),
+            // The acting side is the Recipient, so the row is in the stage named after it.
+            $id = $this->consume($mapping, $shop, $distributor, 'pending_'.strtolower($kind), $input['code'], [
+                'state' => 'pending_'.strtolower($counterparty), ...$this->codeFields($secret),
             ]);
-            $this->record($id, $actor, 'shop_code_verified');
+            if ($id === null) {
+                // The request was past its validity and has been marked Expired by consume;
+                // returning normally lets this transaction commit the transition.
+                return $this->unavailable();
+            }
+            $this->record($id, $actor, $kind === 'Shop' ? 'shop_code_verified' : 'distributor_code_verified');
 
             return $this->secretResponse($id, $secret);
         });
     }
 
-    public function confirm(Request $request, string $shop, ?string $mapping = null): JsonResponse
+    /**
+     * The Initiator confirms the Recipient's second code, activating the mapping (§12.3.5).
+     * Only the completion of both verifications may reach Active.
+     */
+    public function confirm(Request $request, string $business, ?string $mapping = null): JsonResponse
     {
-        $actor = $this->access->requirePermission($shop, 'Shop', 'mapping.confirm');
+        abort_unless(Auth::check(), 401);
+        $kind = $this->mappingKind($business);
+        $actor = $this->access->requirePermission($business, $kind, 'mapping.confirm');
+        $counterpartyField = $kind === 'Shop' ? 'distributor_id' : 'shop_id';
         $input = $request->validate([
-            'distributor_id' => $mapping === null ? 'prohibited' : 'required|uuid',
+            $counterpartyField => $mapping === null ? 'prohibited' : 'required|uuid',
             'code' => 'required|string|size:32',
         ]);
+        // The acting Initiator is `business`; the Recipient is the counterparty.
+        $counterpartyId = $input[$counterpartyField] ?? null;
+        $shop = $kind === 'Shop' ? $business : $counterpartyId;
+        $distributor = $kind === 'Distributor' ? $business : $counterpartyId;
 
-        return DB::transaction(function () use ($mapping, $shop, $actor, $input): JsonResponse {
-            $id = $this->consume($mapping, $shop, $input['distributor_id'] ?? null, 'pending_shop', $input['code'], [
+        return DB::transaction(function () use ($input, $shop, $distributor, $kind, $mapping, $actor): JsonResponse {
+            $id = $this->consume($mapping, $shop, $distributor, 'pending_'.strtolower($kind), $input['code'], [
                 'state' => 'Active', 'code_digest' => null, 'expires_at' => null,
             ]);
+            if ($id === null) {
+                return $this->unavailable();
+            }
             $this->record($id, $actor, 'activated');
 
             return response()->json(['id' => $id, 'state' => 'Active']);
         });
     }
 
+    /**
+     * The Recipient refuses a Pending request (§4.4.1). The request is final and never
+     * reopened, but a fresh request for the same pair remains allowed. Only the party that
+     * did not initiate may reject.
+     */
+    public function reject(string $business, string $mapping): JsonResponse
+    {
+        return $this->decide($business, $mapping, 'Rejected', 'rejected', 'mapping.reject', initiator: false);
+    }
+
+    /**
+     * The Initiator pulls back a Pending request before a decision (§4.4.2). A fresh
+     * request for the same pair remains allowed. Only the party that initiated may withdraw.
+     */
+    public function withdraw(string $business, string $mapping): JsonResponse
+    {
+        return $this->decide($business, $mapping, 'Withdrawn', 'withdrawn', 'mapping.withdraw', initiator: true);
+    }
+
+    /**
+     * Move a Pending request to a terminal request-state (Rejected or Withdrawn). Both
+     * decisions are taken at the first pending stage (the request still awaits the
+     * Recipient, `pending_<counterparty kind>`), where the Initiator may withdraw and the
+     * Recipient may reject. The actor's role is resolved from `initiated_by`.
+     */
+    private function decide(string $business, string $mapping, string $state, string $action, string $permission, bool $initiator): JsonResponse
+    {
+        abort_unless(Auth::check(), 401);
+        $kind = $this->mappingKind($business);
+        $actor = $this->access->requirePermission($business, $kind, $permission);
+
+        return DB::transaction(function () use ($state, $action, $mapping, $business, $actor, $kind, $initiator): JsonResponse {
+            // Both decisions act on the request's first pending stage. The row's state is named
+            // after the Recipient (the side that owes the next decision) and is set by the
+            // Initiator, so it cannot be derived from the acting side's kind. The mapping is
+            // scoped by membership in either column and by being in either pending stage; the
+            // actor's role (Initiator withdraws / Recipient rejects) is resolved from
+            // `initiated_by`, which is what separates the two actions in the same state.
+            $row = DB::table('distributor_shop_mappings')->where('id', $mapping)
+                ->where(function ($query) use ($business): void {
+                    $query->where('shop_id', $business)->orWhere('distributor_id', $business);
+                })->where(function ($query): void {
+                    $query->where('state', 'pending_shop')->orWhere('state', 'pending_distributor');
+                })->lockForUpdate()->first(['id', 'state', 'initiated_by']);
+            abort_if($row === null, 409);
+            // The actor must hold the role that owns this decision: the Initiator withdraws,
+            // the Recipient rejects.
+            abort_unless(($row->initiated_by === $kind) === $initiator, 403);
+            DB::table('distributor_shop_mappings')->where('id', $mapping)->update([
+                'state' => $state, 'code_digest' => null, 'expires_at' => null, 'request_expires_at' => null,
+                'rejected_at' => $action === 'rejected' ? now() : null,
+                'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1'),
+            ]);
+            $this->record($mapping, $actor, $action);
+
+            return response()->json(['id' => $mapping, 'state' => $state]);
+        });
+    }
+
     public function end(string $business, string $mapping): JsonResponse
     {
         abort_unless(Auth::check(), 401);
-        $kind = DB::table('business_identities')->where('id', $business)->value('kind');
+        $kind = $this->mappingKind($business);
         abort_unless(in_array($kind, ['Shop', 'Distributor'], true), 403);
         $actor = $this->access->requirePermission($business, $kind, 'mapping.end');
 
@@ -88,6 +200,7 @@ final class BusinessMappingController
             $changed = DB::table('distributor_shop_mappings')->where('id', $mapping)->where($endpoint, $business)
                 ->whereIn('state', [$issuer, 'Active', 'Suspended', 'Deactivated'])->update([
                     'state' => 'Terminated', 'code_digest' => null, 'expires_at' => null,
+                    'request_expires_at' => null,
                     'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1'),
                 ]);
             abort_unless($changed === 1, 409);
@@ -154,12 +267,28 @@ final class BusinessMappingController
             'mapping' => $catalogue])->header('Cache-Control', 'no-store');
     }
 
-    private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): string
+    private function consume(?string $id, string $shop, ?string $distributor, string $state, string $code, array $next): ?string
     {
         $query = DB::table('distributor_shop_mappings')->where([
             'shop_id' => $shop, 'state' => $state, 'code_digest' => hash('sha256', $code),
         ])->when($id !== null, fn ($mappings) => $mappings->where('id', $id))
             ->when($distributor !== null, fn ($mappings) => $mappings->where('distributor_id', $distributor));
+        // A Pending request not decided within its own validity is expired (§4.4). Lazy
+        // expiry: before the per-code expires_at gate (which an undecided request may
+        // outlive), look for a live request whose request_expires_at has passed and mark it
+        // Expired, so a later attempt sees no live request. The per-code expires_at still
+        // gates each secret exchange on its own.
+        $expired = $query->clone()->where('request_expires_at', '<=', now())->first(['id']);
+        if ($expired !== null) {
+            DB::table('distributor_shop_mappings')->where('id', $expired->id)->update([
+                'state' => 'Expired', 'code_digest' => null, 'expires_at' => null, 'request_expires_at' => null,
+                'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1'),
+            ]);
+            // Report the expiry to the caller as a null id rather than aborting: the caller
+            // is inside a transaction, and aborting here would roll the Expired state back
+            // with it. The caller returns 422 once the transaction has committed.
+            return null;
+        }
         $matches = $query->clone()->where('expires_at', '>', now())->limit(2)->get(['id', 'distributor_id']);
         abort_unless($matches->count() === 1, 422, 'Mapping code is unavailable or invalid.');
         $mapping = $matches->first();
@@ -171,6 +300,12 @@ final class BusinessMappingController
         return $mapping->id;
     }
 
+    /** 422 for an expired request, returned after its Expired transition has committed. */
+    private function unavailable(): JsonResponse
+    {
+        return response()->json(['message' => 'Mapping code is unavailable or invalid.'], 422);
+    }
+
     private function requireActiveEndpoints(string $shop, string $distributor): void
     {
         $endpoints = DB::table('business_identities')->whereIn('id', [$shop, $distributor])->orderBy('id')->lockForUpdate()->get();
@@ -179,6 +314,35 @@ final class BusinessMappingController
             abort_unless($endpoint->operational_state === 'Active'
                 && DB::table('business_identities')->where('id', $endpoint->parent_id)->value('operational_state') === 'Active', 409, 'Both businesses must be active.');
         }
+    }
+
+    /**
+     * Enforce the duplicate-pair ban at the application level as well as through the
+     * live-pair unique index: while a Pending, Active or Deactivated mapping exists for a
+     * pair, a new request is refused (§4.4). A decided request (Rejected/Withdrawn/Expired)
+     * or a Terminated mapping never blocks a fresh request.
+     */
+    private function requireFreshPair(string $shop, string $distributor): void
+    {
+        abort_unless(DB::table('distributor_shop_mappings')->where('shop_id', $shop)->where('distributor_id', $distributor)
+            ->whereIn('state', ['pending_distributor', 'pending_shop', 'Active', 'Deactivated'])->doesntExist(), 409);
+    }
+
+    /**
+     * Resolve the acting endpoint's kind (Shop or Distributor) from the record, so the
+     * Initiator/Recipient role is never assumed from a hardcoded kind.
+     */
+    private function mappingKind(string $business): string
+    {
+        $kind = DB::table('business_identities')->where('id', $business)->value('kind');
+        abort_unless(in_array($kind, ['Shop', 'Distributor'], true), 403);
+
+        return $kind;
+    }
+
+    private function counterpartyKind(string $kind): string
+    {
+        return $kind === 'Shop' ? 'Distributor' : 'Shop';
     }
 
     private function codeFields(string $code): array

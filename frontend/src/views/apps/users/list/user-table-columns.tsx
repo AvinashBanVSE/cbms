@@ -1,12 +1,13 @@
 'use client'
 
 // React Imports
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 // Next Imports
+import Link from 'next/link'
 
 // Third-party Imports
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, RowData } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import {
   BrushIcon,
@@ -22,8 +23,6 @@ import {
   UserXIcon
 } from 'lucide-react'
 
-import Link from '@/components/navigation/OpaqueLink'
-
 // Type Imports
 import type { AppUser, UserBilling, UserRole, UserStatus } from '@/types/apps/user-types'
 
@@ -31,6 +30,15 @@ import type { AppUser, UserBilling, UserRole, UserStatus } from '@/types/apps/us
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -78,73 +86,138 @@ const formatBilling = (billing: UserBilling): string => {
   return 'Manual - PayPal'
 }
 
-function UserRowActions({ user }: { user: AppUser }) {
+interface UserRowActionsProps {
+  user: AppUser
+  onEditUser: (id: string) => void
+  onDeleteUser: (id: string) => void
+  onStatusChange: (id: string, status: UserStatus) => void
+}
+
+function UserRowActions({ user, onEditUser, onDeleteUser, onStatusChange }: UserRowActionsProps) {
+  // States
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+
+  const handleConfirmDelete = () => {
+    onDeleteUser(user.id)
+    setIsDeleteDialogOpen(false)
+  }
+
   return (
-    <div className='flex items-center gap-1'>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant='ghost'
-              size='icon'
-              aria-label='View user'
-              render={<Link href='/apps/users/view' />}
-              nativeButton={false}
-            />
-          }
-        >
-          <EyeIcon className='size-4.5' />
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>View</p>
-        </TooltipContent>
-      </Tooltip>
+    <>
+      <div className='flex items-center gap-1'>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon'
+                aria-label='View user'
+                render={<Link href={`/apps/users/view/${user.id}`} />}
+                nativeButton={false}
+              />
+            }
+          >
+            <EyeIcon className='size-4.5' />
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>View</p>
+          </TooltipContent>
+        </Tooltip>
 
-      <Tooltip>
-        <TooltipTrigger render={<Button variant='ghost' size='icon' aria-label='Delete user' />}>
-          <Trash2Icon className='size-4.5' />
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Delete</p>
-        </TooltipContent>
-      </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon'
+                aria-label='Delete user'
+                onClick={() => setIsDeleteDialogOpen(true)}
+              />
+            }
+          >
+            <Trash2Icon className='size-4.5' />
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Delete</p>
+          </TooltipContent>
+        </Tooltip>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button size='icon' variant='ghost' aria-label='Open actions' />}>
-          <EllipsisVerticalIcon className='size-4.5' aria-hidden='true' />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
-          <DropdownMenuGroup>
-            <DropdownMenuItem>
-              <PencilIcon className='size-4' />
-              Edit User
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {user.status !== 'Suspended' ? (
-              <DropdownMenuItem>
-                <UserXIcon className='size-4' />
-                Suspend
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button size='icon' variant='ghost' aria-label='Open actions' />}>
+            <EllipsisVerticalIcon className='size-4.5' aria-hidden='true' />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end'>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => onEditUser(user.id)}>
+                <PencilIcon className='size-4' />
+                Edit User
               </DropdownMenuItem>
-            ) : null}
-            {user.status !== 'Active' ? (
-              <DropdownMenuItem>
-                <UserCheckIcon className='size-4' />
-                Activate
+              <DropdownMenuSeparator />
+              {user.status !== 'Suspended' ? (
+                <DropdownMenuItem onClick={() => onStatusChange(user.id, 'Suspended')}>
+                  <UserXIcon className='size-4' />
+                  Suspend
+                </DropdownMenuItem>
+              ) : null}
+              {user.status !== 'Active' ? (
+                <DropdownMenuItem onClick={() => onStatusChange(user.id, 'Active')}>
+                  <UserCheckIcon className='size-4' />
+                  Activate
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant='destructive' onClick={() => setIsDeleteDialogOpen(true)}>
+                <Trash2Icon className='size-4' />
+                Delete
               </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant='destructive'>
-              <Trash2Icon className='size-4' />
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Are you sure?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove {user.name}. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant='destructive' onClick={handleConfirmDelete}>
               Delete
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
 export const userTableColumns: ColumnDef<AppUser>[] = [
+  {
+    id: 'select',
+    header: ({ table }) => (
+      <Checkbox
+        checked={table.getIsAllPageRowsSelected()}
+        indeterminate={table.getIsSomePageRowsSelected()}
+        onCheckedChange={value => table.toggleAllPageRowsSelected(!!value)}
+        aria-label='Select all'
+      />
+    ),
+    cell: ({ row }) => (
+      <Checkbox
+        checked={row.getIsSelected()}
+        onCheckedChange={value => row.toggleSelected(!!value)}
+        aria-label='Select row'
+      />
+    ),
+    size: 50,
+    enableSorting: false
+  },
   {
     id: 'user',
     header: 'User',
@@ -221,8 +294,28 @@ export const userTableColumns: ColumnDef<AppUser>[] = [
   {
     id: 'actions',
     header: () => 'Actions',
-    cell: ({ row }) => <UserRowActions user={row.original} />,
+    cell: ({ row, table }) => {
+      const meta = table.options.meta
+
+      return (
+        <UserRowActions
+          user={row.original}
+          onEditUser={meta?.onEditUser ?? (() => undefined)}
+          onDeleteUser={meta?.onDeleteUser ?? (() => undefined)}
+          onStatusChange={meta?.onStatusChange ?? (() => undefined)}
+        />
+      )
+    },
     enableHiding: false,
     enableSorting: false
   }
 ]
+
+declare module '@tanstack/react-table' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface TableMeta<TData extends RowData> {
+    onEditUser: (id: string) => void
+    onDeleteUser: (id: string) => void
+    onStatusChange: (id: string, status: UserStatus) => void
+  }
+}

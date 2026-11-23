@@ -203,16 +203,33 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('organization-setup/verify', [OrganizationCredentialController::class, 'verify'])->middleware('throttle:organization-verify');
     Route::post('organization-setup/complete', [OrganizationCredentialController::class, 'complete'])->middleware('throttle:5,1,organization-complete');
     Route::get('mapping-contexts', fn (CustomerBusinessAccess $access) => response()->json($access->mappingContexts())->header('Cache-Control', 'no-store'));
+    // Symmetric request lifecycle (§4.2): either side may open a request, verify the other's
+    // first code, then confirm the second. Reject is the Recipient's decision; withdraw is
+    // the Initiator's. Routes mirror each other across /shops/{shop}/ and /distributors/{id}/.
     Route::post('shops/{shop}/mappings', [BusinessMappingController::class, 'initiate'])
-        ->whereUuid('shop')->middleware('throttle:10,1,mapping-initiate');
-    Route::post('distributors/{distributor}/mappings/verify', [BusinessMappingController::class, 'verifyShop'])
-        ->whereUuid('distributor')->middleware('throttle:10,1,mapping-verify');
+        ->whereUuid('shop')->middleware('throttle:mapping-initiate');
+    Route::post('distributors/{distributor}/mappings', [BusinessMappingController::class, 'initiate'])
+        ->whereUuid('distributor')->middleware('throttle:mapping-initiate');
+    Route::post('distributors/{distributor}/mappings/verify', [BusinessMappingController::class, 'verify'])
+        ->whereUuid('distributor')->middleware('throttle:mapping-verify');
+    Route::post('shops/{shop}/mappings/verify', [BusinessMappingController::class, 'verify'])
+        ->whereUuid('shop')->middleware('throttle:mapping-verify');
     Route::post('shops/{shop}/mappings/confirm', [BusinessMappingController::class, 'confirm'])
-        ->whereUuid('shop')->middleware('throttle:10,1,mapping-confirm');
-    Route::post('distributors/{distributor}/mappings/{mapping}/verify', [BusinessMappingController::class, 'verifyShop'])
-        ->whereUuid(['distributor', 'mapping'])->middleware('throttle:10,1,mapping-verify');
+        ->whereUuid('shop')->middleware('throttle:mapping-confirm');
+    Route::post('distributors/{distributor}/mappings/confirm', [BusinessMappingController::class, 'confirm'])
+        ->whereUuid('distributor')->middleware('throttle:mapping-confirm');
+    Route::post('distributors/{distributor}/mappings/{mapping}/verify', [BusinessMappingController::class, 'verify'])
+        ->whereUuid(['distributor', 'mapping'])->middleware('throttle:mapping-verify');
+    Route::post('shops/{shop}/mappings/{mapping}/verify', [BusinessMappingController::class, 'verify'])
+        ->whereUuid(['shop', 'mapping'])->middleware('throttle:mapping-verify');
     Route::post('shops/{shop}/mappings/{mapping}/confirm', [BusinessMappingController::class, 'confirm'])
-        ->whereUuid(['shop', 'mapping'])->middleware('throttle:10,1,mapping-confirm');
+        ->whereUuid(['shop', 'mapping'])->middleware('throttle:mapping-confirm');
+    Route::post('distributors/{distributor}/mappings/{mapping}/confirm', [BusinessMappingController::class, 'confirm'])
+        ->whereUuid(['distributor', 'mapping'])->middleware('throttle:mapping-confirm');
+    Route::post('businesses/{business}/mappings/{mapping}/reject', [BusinessMappingController::class, 'reject'])
+        ->whereUuid(['business', 'mapping'])->middleware('throttle:mapping-verify');
+    Route::post('businesses/{business}/mappings/{mapping}/withdraw', [BusinessMappingController::class, 'withdraw'])
+        ->whereUuid(['business', 'mapping'])->middleware('throttle:mapping-verify');
     Route::post('businesses/{business}/mappings/{mapping}/end', [BusinessMappingController::class, 'end'])
         ->whereUuid(['business', 'mapping']);
     Route::get('businesses/{business}/mappings/{mapping}/history', [BusinessMappingController::class, 'history'])

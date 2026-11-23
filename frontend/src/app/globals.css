@@ -206,21 +206,17 @@ input[type='number']::-webkit-outer-spin-button {
   }
 }
 
-@theme inline {
-  --animate-heartbeat: heartbeat 2s infinite ease-in-out;
-
-  @keyframes heartbeat {
-    0% {
-      box-shadow: 0 0 0 0 var(--heartbeat-color, var(--primary));
-      transform: scale(1);
-    }
-    50% {
-      box-shadow: 0 0 0 6px transparent;
-      transform: scale(1.03);
-    }
-    100% {
-      box-shadow: 0 0 0 0 transparent;
-      transform: scale(1);
-    }
-  }
+[data-theme-scale='sm'] {
+  --text-sm: 0.75rem;
+  --text-base: 0.85rem;
+  --text-lg: 1.05rem;
+  --spacing: 0.222222rem;
 }
+
+[data-theme-scale='lg'] {
+  --text-sm: 1rem;
+  --text-base: 1.25rem;
+  --text-lg: 1.45;
+  --spacing: 0.262222rem;
+}
+

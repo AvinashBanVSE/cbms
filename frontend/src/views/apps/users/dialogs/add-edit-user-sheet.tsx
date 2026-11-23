@@ -295,7 +295,7 @@ export function AddEditUserSheet({ mode, user, onClose, onAdd, onEdit }: AddEdit
               Cancel
             </Button>
             <Button type='submit' className='sm:flex-1'>
-              Save Changes
+              {mode === 'edit' ? 'Save Changes' : 'Add User'}
             </Button>
           </SheetFooter>
         </form>
