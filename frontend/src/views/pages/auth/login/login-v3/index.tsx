@@ -11,6 +11,24 @@ import LoginV3Form from '@/views/pages/auth/login/login-v3/login-v3-form'
 // SVG Import
 import LogoVector from '@/assets/svg/logo-vector'
 
+const avatars = [
+  {
+    src: '/images/avatars/avatar-3.webp',
+    fallback: 'OS',
+    name: 'Olivia Sparks'
+  },
+  {
+    src: '/images/avatars/avatar-6.webp',
+    fallback: 'HL',
+    name: 'Howard Lloyd'
+  },
+  {
+    src: '/images/avatars/avatar-5.webp',
+    fallback: 'HR',
+    name: 'Hallie Richards'
+  }
+]
+
 const LoginV3 = () => {
   return (
     <div className='h-dvh lg:grid lg:grid-cols-2'>
@@ -22,7 +40,7 @@ const LoginV3 = () => {
 
           <div>
             <h2 className='mb-2 text-2xl font-semibold'>Sign in to CBM Portal</h2>
-            <p className='text-muted-foreground'>Enter your User Code, email address and password to continue.</p>
+            <p className='text-muted-foreground'>Enter your User Code, email, username or mobile number and password.</p>
           </div>
 
           <div className='space-y-4'>
@@ -43,8 +61,7 @@ const LoginV3 = () => {
           <CardHeader className='relative z-10 gap-6 px-8'>
             <CardTitle className='text-4xl font-bold text-white xl:text-5xl/15.5'>Welcome back!</CardTitle>
             <p className='text-xl text-white'>
-              Thank you for registering! Please check your inbox and click the verification link to activate your
-              account.
+              Secure access to your CBM Portal workspace.
             </p>
           </CardHeader>
 
@@ -68,11 +85,22 @@ const LoginV3 = () => {
             </div>
 
             <div className='flex flex-col gap-5 p-6 text-black'>
-              <p className='line-clamp-2 pr-12 text-3xl font-bold'>Secure portal sign-in</p>
+              <p className='line-clamp-2 pr-12 text-3xl font-bold'>Welcome to CBM Portal</p>
               <p className='line-clamp-2 text-lg'>
-                Use your assigned User Code and registered credentials to access the portal.
+                Sign in using your User Code and an enabled login identifier.
               </p>
 
+              <div className='flex -space-x-4 self-end'>
+                {avatars.map((avatar, index) => (
+                  <Avatar key={index} className='size-12 ring-2 ring-white'>
+                    <AvatarImage src={avatar.src} alt={avatar.name} />
+                    <AvatarFallback className='text-xs'>{avatar.fallback}</AvatarFallback>
+                  </Avatar>
+                ))}
+                <Avatar className='size-12 ring-2 ring-white'>
+                  <AvatarFallback className='bg-[#F5F5F5] text-xs'>+3695</AvatarFallback>
+                </Avatar>
+              </div>
             </div>
           </CardContent>
         </Card>
