@@ -98,7 +98,7 @@ const LoginV3 = () => {
                   </Avatar>
                 ))}
                 <Avatar className='size-12 ring-2 ring-white'>
-                  <AvatarFallback className='bg-[#F5F5F5] text-xs'>+3695</AvatarFallback>
+                  <AvatarFallback className='bg-[#F5F5F5] text-xs'>CBM</AvatarFallback>
                 </Avatar>
               </div>
             </div>
