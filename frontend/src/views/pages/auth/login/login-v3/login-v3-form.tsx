@@ -142,7 +142,7 @@ const LoginV3Form = () => {
             <Field className='gap-2'>
               <FieldLabel htmlFor='enrollmentCode'>Authenticator Code*</FieldLabel>
               <Input id='enrollmentCode' value={enrollmentCode}
-                onChange={event => setEnrollmentCode(event.target.value.replace(/\\D/g, '').slice(0, 6))}
+                onChange={event => setEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
                 inputMode='numeric' maxLength={6} pattern='[0-9]{6}' placeholder='6-digit code' />
             </Field>
             <Button className='w-full' disabled={busy || enrollmentCode.length !== 6}
