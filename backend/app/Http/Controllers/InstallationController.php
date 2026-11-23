@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Accounts\UserCode;
 use App\Authorization\PermissionCatalogue;
 use App\Validation\PermanentPassword;
 use Illuminate\Http\JsonResponse;
@@ -48,7 +49,7 @@ final class InstallationController
             $portal = DB::table('portal_installation')->where('id', 1)->value('portal_id');
             $owner = (string) Str::uuid7();
             $user = (string) Str::uuid7();
-            $code = chr(random_int(65, 90)).chr(random_int(65, 90)).sprintf('%04d', random_int(0, 9999));
+            $code = UserCode::allocate();
             DB::table('ownership_holders')->insert(['id' => $owner, 'name' => $data['name']]);
             DB::table('ownership_links')->insert(['id' => (string) Str::uuid7(), 'owner_id' => $owner, 'business_id' => $portal]);
             DB::table('users')->insert(['id' => $user, 'email' => $data['email'], 'code' => $code, 'password' => $password]);
