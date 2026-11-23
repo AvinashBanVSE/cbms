@@ -176,4 +176,49 @@ final class LoginIdentifiersTest extends TestCase
         $this->assertDatabaseCount('reserved_usernames', 0);
     }
 
+    public function test_authorized_main_portal_staff_can_manage_reserved_names(): void
+    {
+        $staff = $this->user('KK1234', 'staff@example.test');
+        $portal = Str::uuid7()->toString();
+        DB::table('business_identities')->insert([
+            'id' => $portal, 'kind' => 'Main Portal', 'professional_name' => 'CBM',
+        ]);
+        DB::table('portal_installation')->where('id', 1)->update([
+            'portal_id' => $portal, 'stage' => 'ready',
+        ]);
+        DB::table('portal_grants')->insert([
+            'user_id' => $staff, 'business_id' => $portal, 'permission' => 'organization_users.manage',
+        ]);
+        $this->actingAs(User::findOrFail($staff));
+
+        $this->postJson('/api/v1/reserved-usernames', [
+            'username' => 'Administrator',
+        ])->assertCreated()->assertJsonPath('username', 'administrator');
+        $this->getJson('/api/v1/reserved-usernames')
+            ->assertOk()->assertJsonPath('data.0', 'administrator');
+        $this->postJson('/api/v1/reserved-usernames', [
+            'username' => 'administrator',
+        ])->assertUnprocessable();
+        $this->deleteJson('/api/v1/reserved-usernames/administrator')->assertNoContent();
+        $this->assertDatabaseCount('reserved_usernames', 0);
+    }
+
+    public function test_alias_login_preserves_authenticator_challenge(): void
+    {
+        $user = $this->user('LL1234', 'factor@example.test');
+        DB::table('users')->where('id', $user)->update([
+            'username' => 'factor.user', 'username_login_enabled' => true,
+        ]);
+        DB::table('user_authenticators')->insert([
+            'user_id' => $user,
+            'secret' => \Illuminate\Support\Facades\Crypt::encryptString('test-only-authenticator-key'),
+            'version' => 1,
+        ]);
+
+        $this->postJson('/api/v1/login', [
+            'code' => 'LL1234', 'identifier' => 'factor.user', 'password' => self::PASSWORD,
+        ])->assertAccepted()->assertJsonPath('stage', 'authenticator_required');
+        $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
+    }
+
 }
