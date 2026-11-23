@@ -19,6 +19,7 @@ fi
 # Keep this list limited to sources cited by the high-risk reference. A new durable
 # contract must add its authoritative source here in the same change.
 contract_sources=(
+    'backend/app/Accounts/LoginIdentity.php'
     'backend/app/Accounts/SetupDelivery.php'
     'backend/app/Accounts/UserCode.php'
     'backend/app/Authorization/MainPortalAccess.php'
@@ -34,6 +35,7 @@ contract_sources=(
     'backend/app/Http/Controllers/BusinessStructureController.php'
     'backend/app/Http/Controllers/ClientActivationController.php'
     'backend/app/Http/Controllers/InstallationController.php'
+    'backend/app/Http/Controllers/UserLoginIdentifierController.php'
     'backend/app/Http/Controllers/OrganizationCredentialController.php'
     'backend/app/Http/Controllers/WorkspaceAccessController.php'
     'backend/app/Http/Middleware/ValidateOrganizationSession.php'
@@ -53,6 +55,8 @@ contract_sources=(
     'frontend/src/lib/client-navigation.ts'
     'frontend/src/lib/opaque-navigation.ts'
     'frontend/src/proxy.ts'
+    'frontend/src/views/pages/auth/login/login-v3/index.tsx'
+    'frontend/src/views/pages/auth/login/login-v3/login-v3-form.tsx'
 )
 
 mapfile -t changed < <(git -C "$repo_root" diff --name-only "$verified_tree" -- "${contract_sources[@]}")
