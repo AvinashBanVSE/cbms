@@ -32,6 +32,7 @@ use App\Http\Controllers\OrganizationMfaController;
 use App\Http\Controllers\OrganizationRoleController;
 use App\Http\Controllers\OrganizationUserController;
 use App\Http\Controllers\ProviderUserController;
+use App\Http\Controllers\ReservedUsernameController;
 use App\Http\Controllers\RoleApprovalController;
 use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
@@ -52,6 +53,12 @@ Route::prefix('api/v1')->group(function (): void {
     Route::post('authenticator/disable', [AuthenticatorController::class, 'disable'])->middleware('throttle:5,1,authenticator-disable');
     Route::get('tenants/{tenant}/mfa-policy', [OrganizationMfaController::class, 'show'])->whereUuid('tenant');
     Route::post('tenants/{tenant}/mfa-policy', [OrganizationMfaController::class, 'update'])->whereUuid('tenant');
+    Route::get('me/login-identifiers', [UserLoginIdentifierController::class, 'show']);
+    Route::put('me/login-identifiers', [UserLoginIdentifierController::class, 'update'])->middleware('throttle:5,1,login-identifier-update');
+    Route::get('reserved-usernames', [ReservedUsernameController::class, 'index']);
+    Route::post('reserved-usernames', [ReservedUsernameController::class, 'store'])->middleware('throttle:10,1,reserved-usernames');
+    Route::delete('reserved-usernames/{username}', [ReservedUsernameController::class, 'destroy'])
+        ->where('username', '[a-z][a-z0-9._-]{2,31}')->middleware('throttle:10,1,reserved-usernames');
     Route::get('credential-settings', [CredentialSettingsController::class, 'show']);
     Route::post('credential-settings', [CredentialSettingsController::class, 'update']);
     Route::get('credential-settings/setup-otp', [CredentialSettingsController::class, 'showOtp']);
