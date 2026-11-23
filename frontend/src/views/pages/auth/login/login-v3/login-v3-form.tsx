@@ -19,12 +19,16 @@ const LoginV3Form = () => {
   const [stage, setStage] = useState<LoginStage>('credentials')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [setupKey, setSetupKey] = useState('')
+  const [enrollmentCode, setEnrollmentCode] = useState('')
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
     setBusy(true)
     setError('')
+    setMessage('')
     try {
       const csrfResponse = await fetch('/api/v1/csrf', { credentials: 'include', cache: 'no-store' })
       if (!csrfResponse.ok) throw new Error('Unable to initialize a secure login session.')
@@ -58,7 +62,6 @@ const LoginV3Form = () => {
           return
         }
         if (data.stage === 'authenticator_enrollment_required') {
-          setPassword('')
           setStage('authenticator_enrollment_required')
           return
         }
@@ -75,15 +78,80 @@ const LoginV3Form = () => {
     }
   }
 
+  async function enroll(action: 'prepare' | 'confirm') {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const csrfResponse = await fetch('/api/v1/csrf', { credentials: 'include', cache: 'no-store' })
+      if (!csrfResponse.ok) throw new Error('Unable to initialize a secure session.')
+      const csrf = (await csrfResponse.json()) as { token: string }
+      const response = await fetch('/api/v1/authenticator/' + action, {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json', 'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': csrf.token
+        },
+        body: JSON.stringify(action === 'prepare'
+          ? { password }
+          : { password, code: enrollmentCode })
+      })
+      if (!response.ok) {
+        if (response.status === 429) throw new Error('Too many attempts. Please try again later.')
+        if (response.status === 401) throw new Error('Your enrollment session expired. Sign in again.')
+        throw new Error('Unable to complete authenticator setup. Check your password and code.')
+      }
+      if (action === 'prepare') {
+        const data = (await response.json()) as { setup_key?: string }
+        if (!data.setup_key) throw new Error('Authenticator setup key was not returned.')
+        setSetupKey(data.setup_key)
+      } else {
+        setSetupKey('')
+        setEnrollmentCode('')
+        setPassword('')
+        setStage('credentials')
+        setMessage('Authenticator enabled. Sign in again with a new authenticator code.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to set up authenticator.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (stage === 'authenticated') {
     return <p role='status' className='text-sm'>Sign-in successful. Your session is now authenticated.</p>
   }
 
   if (stage === 'authenticator_enrollment_required') {
     return (
-      <p role='status' className='text-sm'>
-        Your organization requires authenticator enrollment before sign-in. Enrollment must be completed through the approved authenticator setup flow.
-      </p>
+      <div className='space-y-4'>
+        <p className='text-sm'>Your organization requires an authenticator before you can sign in.</p>
+        {error && <p role='alert' className='text-destructive text-sm'>{error}</p>}
+        {message && <p role='status' className='text-sm'>{message}</p>}
+        {!setupKey ? (
+          <Button className='w-full' disabled={busy} onClick={() => enroll('prepare')}>
+            {busy ? 'Preparing...' : 'Set Up Authenticator'}
+          </Button>
+        ) : (
+          <>
+            <p className='text-muted-foreground text-sm'>Add this setup key to your authenticator app. Keep it private.</p>
+            <p className='bg-muted rounded-md p-3 font-mono text-sm break-all' aria-label='Authenticator setup key'>{setupKey}</p>
+            <Field className='gap-2'>
+              <FieldLabel htmlFor='enrollmentCode'>Authenticator Code*</FieldLabel>
+              <Input id='enrollmentCode' value={enrollmentCode}
+                onChange={event => setEnrollmentCode(event.target.value.replace(/\\D/g, '').slice(0, 6))}
+                inputMode='numeric' maxLength={6} pattern='[0-9]{6}' placeholder='6-digit code' />
+            </Field>
+            <Button className='w-full' disabled={busy || enrollmentCode.length !== 6}
+              onClick={() => enroll('confirm')}>
+              {busy ? 'Verifying...' : 'Enable Authenticator'}
+            </Button>
+          </>
+        )}
+      </div>
     )
   }
 
