@@ -101,7 +101,7 @@ Route::prefix('api/v1')->group(function (): void {
             $input = $request->validate([
                 'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
                 // Keep the existing email field for already deployed API clients.
-                'identifier' => 'required_without:email|prohibited_with:email|string|max:254',
+                'identifier' => 'required_without:email|prohibits:email|string|max:254',
                 'email' => 'required_without:identifier|email|max:254',
                 'password' => 'required|string',
                 'authenticator_code' => 'sometimes|required|regex:/^[0-9]{6}$/D',
