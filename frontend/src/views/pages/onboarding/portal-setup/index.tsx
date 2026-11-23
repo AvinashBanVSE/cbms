@@ -133,7 +133,7 @@ export default function PortalSetup() {
           </div>
           <div className='flex w-full flex-col gap-5'>
             {step === 'complete' ? (
-              <Button className='w-full' render={<Link href='/pages/auth/login-v1' />} nativeButton={false}>
+              <Button className='w-full' render={<Link href='/pages/auth/login-v3' />} nativeButton={false}>
                 Continue to Sign In
               </Button>
             ) : (
