@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Accounts\Authenticator;
+use App\Accounts\LoginIdentity;
 use App\Accounts\OrganizationMfaPolicy;
 use App\Authorization\CustomerBusinessAccess;
 use App\Authorization\MainPortalAccess;
@@ -22,6 +23,7 @@ use App\Http\Controllers\CredentialSettingsController;
 use App\Http\Controllers\GlobalBusinessSettingsController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\LegalIdentityController;
+use App\Http\Controllers\UserLoginIdentifierController;
 use App\Http\Controllers\OrganizationAccessController;
 use App\Http\Controllers\OrganizationAccountLifecycleController;
 use App\Http\Controllers\OrganizationCredentialController;
@@ -97,23 +99,29 @@ Route::prefix('api/v1')->group(function (): void {
         Route::post('login', function (Request $request) {
             $request->session()->forget(OrganizationMfaPolicy::ENROLLMENT_SESSION);
             $input = $request->validate([
-                'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/', 'email' => 'required|email',
+                'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
+                // Keep the existing email field for already deployed API clients.
+                'identifier' => 'required_without:email|prohibited_with:email|string|max:254',
+                'email' => 'required_without:identifier|email|max:254',
                 'password' => 'required|string',
                 'authenticator_code' => 'sometimes|required|regex:/^[0-9]{6}$/D',
             ]);
             $code = $input['authenticator_code'] ?? null;
-            unset($input['authenticator_code']);
-            $credentials = $input;
+            $identifier = $input['identifier'] ?? $input['email'];
+            $credentials = ['code' => $input['code'], 'password' => $input['password']];
             $version = null;
             $factorVersion = null;
             $needsCode = false;
             $factorThrottled = false;
             $enrollment = null;
-            $authenticated = DB::transaction(static function () use ($credentials, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
+            $authenticated = DB::transaction(static function () use ($credentials, $identifier, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
                 // Serialize password checking and Laravel's optional rehash with credential changes.
                 DB::table('users')->where('code', $credentials['code'])->lockForUpdate()->first(['id']);
 
-                return Auth::attemptWhen($credentials, static function ($user) use ($code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
+                return Auth::attemptWhen($credentials, static function ($user) use ($identifier, $code, &$version, &$factorVersion, &$needsCode, &$factorThrottled, &$enrollment): bool {
+                    if (! LoginIdentity::matches($user, $identifier)) {
+                        return false;
+                    }
                     $account = ProviderAccess::sessionAccount((string) $user->getAuthIdentifier());
                     $version = $account === null ? null : (int) $account->session_version;
                     if ($account !== null && $account->state !== 'Active') {
