@@ -1,4 +1,4 @@
-# Central Business Management (CBM) Portal
+# Centralized Business Management System (CBMS)
 # Master Business & Architecture Decisions
 
 | Document attribute | Value |
@@ -8,7 +8,7 @@
 | Document role | Single authoritative source for finalized business and architectural decisions captured to date |
 | Project stage | Business concept and logical architecture definition |
 | Implementation authorization | This document does not authorize software implementation or deployment |
-| Language | English; CBM domain terms are retained consistently |
+| Language | English; legacy CBM domain references are retained where necessary to preserve previously approved definitions |
 
 ## Contents
 
@@ -50,7 +50,7 @@
 
 ### 1.1 Purpose
 
-This document consolidates the project vision and all business-level and logical-architecture decisions explicitly finalized for the CBM Portal through 19 November 2026. It is the authoritative baseline from which subsequent project documentation is to be derived.
+This document consolidates the project vision and all business-level and logical-architecture decisions explicitly finalized through 19 November 2026, with the subsequently approved official product identity recorded in Section 2.1. It is the authoritative baseline from which subsequent project documentation is to be derived.
 
 The document exists to prevent finalized decisions from being lost, contradicted, interpreted inconsistently, or omitted when later architecture and development documents are prepared.
 
@@ -86,9 +86,11 @@ The absence of a topic from this document must not be interpreted as approval of
 
 ### 2.1 Project identity
 
-The project is named **Central Business Management (CBM) Portal**.
+The officially approved product name is **Centralized Business Management System (CBMS)**. The official product domain is **`cbmsys.in`**.
 
-CBM is a comprehensive SaaS-based business-management platform combined with a white-label service-provider ecosystem.
+Earlier references to **CBM**, **CBM Portal**, or **Central Business Management (CBM) Portal** in existing architecture terminology are legacy product-name references; they do not establish a separate product or override this finalized name. Established architecture terms such as Main Portal and Sub-Portal retain their existing meanings. This identity decision does not by itself assert DNS configuration, hosting, certificate issuance, or deployment readiness.
+
+CBMS is a comprehensive SaaS-based business-management platform combined with a white-label service-provider ecosystem.
 
 ### 2.2 Product objective
 
