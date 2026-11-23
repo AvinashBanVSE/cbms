@@ -129,7 +129,7 @@ const LoginV3Form = () => {
           <Field className='gap-2'>
             <FieldLabel htmlFor='authenticatorCode'>Authenticator Code*</FieldLabel>
             <Input id='authenticatorCode' value={authenticatorCode}
-              onChange={event => setAuthenticatorCode(event.target.value.replace(/\\D/g, '').slice(0, 6))}
+              onChange={event => setAuthenticatorCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
               inputMode='numeric' pattern='[0-9]{6}' maxLength={6} required autoComplete='one-time-code'
               placeholder='6-digit code' disabled={busy} />
           </Field>
