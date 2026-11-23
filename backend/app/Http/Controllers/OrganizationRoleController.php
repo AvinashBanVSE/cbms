@@ -41,7 +41,7 @@ final class OrganizationRoleController
         $kind = OrganizationBusinessRoles::businessKind($tenant, $business);
         $data = $request->validate([
             'name' => 'required|string|max:100',
-            'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
+            'actions' => 'required|array|list|max:'.MappingPermissions::maxActions(),
             'actions.*' => 'required|string|distinct',
         ]);
         MappingPermissions::validate($kind, $data['actions']);

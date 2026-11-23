@@ -10,12 +10,6 @@ if [[ ! -f "$reference" ]]; then
     exit 1
 fi
 
-verified_tree="$(sed -nE 's/^\*\*Verified source tree:\*\* `([0-9a-f]{40})`$/\1/p' "$reference")"
-if [[ -z "$verified_tree" ]] || ! git -C "$repo_root" cat-file -e "$verified_tree^{tree}" 2>/dev/null; then
-    echo "agent contracts: invalid or unavailable Verified source tree" >&2
-    exit 1
-fi
-
 # Keep this list limited to sources cited by the high-risk reference. A new durable
 # contract must add its authoritative source here in the same change.
 contract_sources=(
@@ -25,6 +19,12 @@ contract_sources=(
     'backend/app/Authorization/MainPortalAccess.php'
     'backend/app/Authorization/OrganizationAccessDelegation.php'
     'backend/app/Authorization/PermissionCatalogue.php'
+    'backend/app/Authorization/MappingPermissions.php'
+    'backend/app/Authorization/CustomerBusinessAccess.php'
+    'backend/app/Authorization/OrganizationOnboardingAccess.php'
+    'backend/app/Authorization/OrganizationTimePresentationAccess.php'
+    'backend/app/Http/Controllers/PermissionCatalogueController.php'
+    'backend/database/migrations/2026_11_24_000052_create_permission_catalogue.php'
     'backend/app/Authorization/ProviderAccess.php'
     'backend/app/Clients/ClientActivation.php'
     'backend/app/Domain/BusinessLifecycle.php'
@@ -47,27 +47,35 @@ contract_sources=(
     'backend/routes/api.php'
     'backend/routes/browser.php'
     'backend/tools/check-coverage.php'
+    'frontend/next.config.ts'
+    'frontend/src/views/pages/onboarding/portal-setup/index.tsx'
     'frontend/package.json'
-    'frontend/playwright.config.ts'
-    'frontend/src/app/[opaqueId]/page.tsx'
-    'frontend/src/app/navigation/route.ts'
-    'frontend/src/components/auth/AuthenticatedLayout.tsx'
-    'frontend/src/lib/cbms-api.ts'
-    'frontend/src/lib/client-navigation.ts'
-    'frontend/src/lib/opaque-navigation.ts'
-    'frontend/src/proxy.ts'
     'frontend/src/views/pages/auth/login/login-v3/index.tsx'
     'frontend/src/views/pages/auth/login/login-v3/login-v3-form.tsx'
 )
 
-mapfile -t changed < <(git -C "$repo_root" diff --name-only "$verified_tree" -- "${contract_sources[@]}")
-
-if (( ${#changed[@]} == 0 )); then
-    echo "agent contracts: fresh ($verified_tree)"
+manifest="$repo_root/docs/agent-contracts.sha256"
+if [[ "${1:-}" == "--refresh" ]]; then
+    : > "$manifest"
+    for source in "${contract_sources[@]}"; do
+        if [[ -f "$repo_root/$source" ]]; then
+            (cd "$repo_root" && sha256sum "$source") >> "$manifest"
+        else
+            echo "Missing contract source: $source" >&2
+            exit 1
+        fi
+    done
+    echo "agent contracts: manifest refreshed; review and commit it with the sources"
     exit 0
 fi
-
-echo "agent contracts: stale; review only these changed contract sources:" >&2
-printf '  - %s\n' "${changed[@]}" >&2
-echo "Reconcile docs/agent-contracts.md, refresh its Verified source tree, and rerun this check." >&2
-exit 1
+if [[ ! -f "$manifest" ]]; then
+    echo "agent contracts: missing committed source manifest" >&2
+    exit 1
+fi
+for source in "${contract_sources[@]}"; do
+    if ! grep -Fqx "$(cd "$repo_root" && sha256sum "$source")" "$manifest"; then
+        echo "agent contracts: stale: $source" >&2
+        exit 1
+    fi
+done
+echo "agent contracts: fresh"

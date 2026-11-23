@@ -1,6 +1,6 @@
 # Authorization policy decisions for ratification
 Date: 2026-11-24
-Status: proposed final rules. The implementation plan and four foundational requirements are approved; these newly specified policy choices await explicit ratification. This is not the final database architecture or migration approval.
+Status: all policy rules ratified by the user on 2026-11-24, with implementation authorized. This records policy decisions; implementation progress is tracked separately.
 
 ## Confirmed requirements
 Independent entity-owned roles, a database-backed permission catalogue, explicit assigned scope, and central authorization are required. Permission (action), Role (group of actions), Scope (eligible targets), and Configuration (governed behavior) remain separate. Preserve Master Decisions sections 3.15.1 and 7–11, including one Organization architecture per customer account and Main Portal governing authority.

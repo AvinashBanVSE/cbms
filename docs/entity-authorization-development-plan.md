@@ -1,6 +1,6 @@
 # Entity-scoped authorization and configuration development plan
 
-Status: implementation proposal for review; not a change to approved master decisions or runtime behavior. Prepared 2026-11-23 from main d22fe6f on audit/hardcoded-policy-20261123.
+Status: plan approved; policy decisions ratified and implementation authorized on 2026-11-24. See authorization-policy-decisions.md for the ratified rules and authorization-implementation-status.md for delivery progress. This plan is not itself proof of implemented behavior. Prepared 2026-11-23 from main d22fe6f on audit/hardcoded-policy-20261123.
 
 ## 1. Authority and observed gaps
 

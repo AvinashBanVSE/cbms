@@ -26,7 +26,7 @@ final class WorkspaceAccessController
     ): JsonResponse {
         $user = Auth::id();
         abort_if($user === null, 401);
-        $entries = array_filter(PermissionCatalogue::MAIN_PORTAL);
+        $entries = array_filter(PermissionCatalogue::mainPortal());
         $grants = $portal->grantsFor((string) $user)->whereIn('permission', array_keys($entries))->pluck('permission')->all();
         $workspaces = array_values(array_intersect_key($entries, array_fill_keys($grants, true)));
 

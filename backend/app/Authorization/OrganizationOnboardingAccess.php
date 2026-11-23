@@ -55,6 +55,7 @@ final class OrganizationOnboardingAccess
                     ->where('permission.action', $permission);
             })
             ->where('account.user_id', $user)->where('account.state', 'Active')
+            ->whereIn('permission.action', PermissionCatalogue::actions('Organization'))
             ->where('organization.kind', 'Organization')->where('organization.operational_state', 'Active');
     }
 }

@@ -77,7 +77,7 @@ final class OrganizationUserController
         $input = $request->validate([
             'email' => 'required|email|max:254',
             'business_id' => 'required|uuid',
-            'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
+            'actions' => 'required|array|list|max:'.MappingPermissions::maxActions(),
             'actions.*' => 'required|string|distinct',
         ]);
         $id = Str::uuid7()->toString();

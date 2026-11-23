@@ -24,6 +24,7 @@ final class ProviderAccess
             ->where('account.user_id', $user)->where('account.state', 'Active')
             ->where('provider.kind', 'Sub-Portal')->where('provider.operational_state', 'Active')
             ->where('grant.permission', self::DIRECTORY)
+            ->whereIn('grant.permission', PermissionCatalogue::actions('Sub-Portal'))
             ->whereNotExists(fn ($accounts) => $accounts->selectRaw('1')->from('customer_accounts')->where('user_id', $user));
     }
 

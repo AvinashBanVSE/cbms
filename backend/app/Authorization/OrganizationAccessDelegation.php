@@ -42,6 +42,7 @@ final class OrganizationAccessDelegation
                 $join->on('scope.user_id', '=', 'grant.recipient_id')->on('scope.business_id', '=', 'grant.business_id');
             })
             ->where('installation.id', 1)->where('recipient.state', 'Active')
+            ->whereIn('authority.permission', array_keys(PermissionCatalogue::mainPortal()))
             ->where('grant.recipient_id', $recipient)
             ->whereColumn('recipient.tenant_id', 'tenant.id')->whereColumn('business.parent_id', 'tenant.organization_id')
             ->whereNotExists(function (Builder $query): void {
