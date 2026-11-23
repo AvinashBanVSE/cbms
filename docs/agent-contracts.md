@@ -2,7 +2,7 @@
 
 This is a source-linked working reference for coding agents, not a design proposal or a repository map. It records only non-obvious contracts that cross modules or stacks and are costly to reconstruct incorrectly.
 
-**Verified source tree:** `2a5735a808d174a70c087edd7a064f9b2a91c4f9`
+**Verified source tree:** `a7e3879f182c7aa5eb1efed30e732984e209ac24`
 
 Run `scripts/check-agent-contracts.sh` before relying on this file. A stale result means that one or more cited contract sources changed after the tree above; inspect only the paths reported by the checker and reconcile the affected statements. Source code always wins.
 
