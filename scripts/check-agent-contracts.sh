@@ -36,6 +36,7 @@ contract_sources=(
     'backend/app/Http/Controllers/ClientActivationController.php'
     'backend/app/Http/Controllers/InstallationController.php'
     'backend/app/Http/Controllers/UserLoginIdentifierController.php'
+    'backend/app/Http/Controllers/ReservedUsernameController.php'
     'backend/app/Http/Controllers/OrganizationCredentialController.php'
     'backend/app/Http/Controllers/WorkspaceAccessController.php'
     'backend/app/Http/Middleware/ValidateOrganizationSession.php'
