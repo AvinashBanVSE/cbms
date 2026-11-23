@@ -39,7 +39,7 @@ final class BusinessMappingController
         $shop = $kind === 'Shop' ? $business : $counterpartyId;
         $distributor = $kind === 'Distributor' ? $business : $counterpartyId;
 
-        return DB::transaction(function () use ($input, $shop, $distributor, $counterparty, $business, $actor, $kind): JsonResponse {
+        return DB::transaction(function () use ($input, $shop, $distributor, $counterparty, $actor, $kind): JsonResponse {
             $this->requireActiveEndpoints($shop, $distributor);
             $this->requireFreshPair($shop, $distributor);
             $id = Str::uuid7()->toString();
@@ -284,6 +284,7 @@ final class BusinessMappingController
                 'state' => 'Expired', 'code_digest' => null, 'expires_at' => null, 'request_expires_at' => null,
                 'lifecycle_operation_id' => null, 'lifecycle_version' => DB::raw('lifecycle_version + 1'),
             ]);
+
             // Report the expiry to the caller as a null id rather than aborting: the caller
             // is inside a transaction, and aborting here would roll the Expired state back
             // with it. The caller returns 422 once the transaction has committed.

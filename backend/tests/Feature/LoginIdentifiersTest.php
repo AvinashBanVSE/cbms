@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -148,6 +149,7 @@ final class LoginIdentifiersTest extends TestCase
             'password' => self::PASSWORD, 'username' => '9876543210',
         ])->assertUnprocessable()->assertJsonValidationErrors('username');
     }
+
     public function test_reserved_username_is_rejected(): void
     {
         DB::table('reserved_usernames')->insert([
@@ -211,7 +213,7 @@ final class LoginIdentifiersTest extends TestCase
         ]);
         DB::table('user_authenticators')->insert([
             'user_id' => $user,
-            'secret' => \Illuminate\Support\Facades\Crypt::encryptString('test-only-authenticator-key'),
+            'secret' => Crypt::encryptString('test-only-authenticator-key'),
             'version' => 1,
         ]);
 
@@ -220,5 +222,4 @@ final class LoginIdentifiersTest extends TestCase
         ])->assertAccepted()->assertJsonPath('stage', 'authenticator_required');
         $this->getJson('/api/v1/workspace-access')->assertUnauthorized();
     }
-
 }

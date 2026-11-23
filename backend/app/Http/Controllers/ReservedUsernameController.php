@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Authorization\MainPortalAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -49,7 +50,7 @@ final class ReservedUsernameController
         return response()->json(['username' => $username], 201)->header('Cache-Control', 'no-store');
     }
 
-    public function destroy(string $username, MainPortalAccess $access): JsonResponse
+    public function destroy(string $username, MainPortalAccess $access): Response
     {
         $access->requirePermission('organization_users.manage');
         DB::transaction(static function () use ($username, $access): void {
