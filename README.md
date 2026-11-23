@@ -1,6 +1,12 @@
-# CBM Portal
+# Centralized Business Management System (CBMS)
 
-Laravel 13 serves the CBM API. The web client uses React and TypeScript.
+**Official product name:** Centralized Business Management System  
+**Official abbreviation:** CBMS  
+**Official domain:** `cbmsys.in`
+
+The domain is the approved product identity; DNS, hosting, HTTPS and deployment configuration must be verified separately. This documentation change does not configure deployment automatically.
+
+Laravel 13 serves the CBMS API. The web client uses React and TypeScript.
 The current development branch contains installation, the first Main Portal Owner account, browser sign-in and the authorized service category catalogue.
 
 ## Install the first portal
