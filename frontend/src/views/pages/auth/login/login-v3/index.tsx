@@ -5,31 +5,11 @@ import Link from 'next/link'
 import Logo from '@/components/shared/Logo'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import Silk from '@/components/ui/bg-silk'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 import LoginV3Form from '@/views/pages/auth/login/login-v3/login-v3-form'
 
 // SVG Import
 import LogoVector from '@/assets/svg/logo-vector'
-
-const avatars = [
-  {
-    src: '/images/avatars/avatar-3.webp',
-    fallback: 'OS',
-    name: 'Olivia Sparks'
-  },
-  {
-    src: '/images/avatars/avatar-6.webp',
-    fallback: 'HL',
-    name: 'Howard Lloyd'
-  },
-  {
-    src: '/images/avatars/avatar-5.webp',
-    fallback: 'HR',
-    name: 'Hallie Richards'
-  }
-]
 
 const LoginV3 = () => {
   return (
@@ -41,34 +21,13 @@ const LoginV3 = () => {
           </Link>
 
           <div>
-            <h2 className='mb-2 text-2xl font-semibold'>Welcome Back</h2>
-            <p className='text-muted-foreground'>Welcome back! Select method to login:</p>
-          </div>
-
-          <div className='flex flex-wrap gap-4 sm:gap-6'>
-            <Button variant='outline' className='grow' render={<Link href='#' />} nativeButton={false}>
-              Login with Google
-            </Button>
-            <Button variant='outline' className='grow' render={<Link href='#' />} nativeButton={false}>
-              Login with Facebook
-            </Button>
-          </div>
-
-          <div className='flex items-center gap-4'>
-            <Separator className='flex-1' />
-            <p>Or continue with Email</p>
-            <Separator className='flex-1' />
+            <h2 className='mb-2 text-2xl font-semibold'>Sign in to CBM Portal</h2>
+            <p className='text-muted-foreground'>Enter your User Code, email address and password to continue.</p>
           </div>
 
           <div className='space-y-4'>
             {/* Login Form */}
             <LoginV3Form />
-            <p className='text-muted-foreground text-center'>
-              New on our platform?{' '}
-              <Link href='/pages/auth/register-v3' className='text-foreground hover:underline'>
-                Create an account
-              </Link>
-            </p>
           </div>
         </div>
       </div>
@@ -109,22 +68,11 @@ const LoginV3 = () => {
             </div>
 
             <div className='flex flex-col gap-5 p-6 text-black'>
-              <p className='line-clamp-2 pr-12 text-3xl font-bold'>Please enter your login details</p>
+              <p className='line-clamp-2 pr-12 text-3xl font-bold'>Secure portal sign-in</p>
               <p className='line-clamp-2 text-lg'>
-                Stay connected with shadcn/studio Subscribe now for the latest updates and news.
+                Use your assigned User Code and registered credentials to access the portal.
               </p>
 
-              <div className='flex -space-x-4 self-end'>
-                {avatars.map((avatar, index) => (
-                  <Avatar key={index} className='size-12 ring-2 ring-white'>
-                    <AvatarImage src={avatar.src} alt={avatar.name} />
-                    <AvatarFallback className='text-xs'>{avatar.fallback}</AvatarFallback>
-                  </Avatar>
-                ))}
-                <Avatar className='size-12 ring-2 ring-white'>
-                  <AvatarFallback className='bg-[#F5F5F5] text-xs'>+3695</AvatarFallback>
-                </Avatar>
-              </div>
             </div>
           </CardContent>
         </Card>
