@@ -159,6 +159,7 @@ const LoginV3Form = () => {
     <form onSubmit={submit}>
       <FieldGroup className='gap-4'>
         {error && <p role='alert' className='text-destructive text-sm'>{error}</p>}
+        {message && <p role='status' className='text-sm'>{message}</p>}
         <Field className='gap-2'>
           <FieldLabel htmlFor='userCode'>User Code*</FieldLabel>
           <Input
