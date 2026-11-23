@@ -27,7 +27,12 @@ final class UserLoginIdentifierController
         $current = DB::table('users')->where('id', $id)->first(self::FIELDS);
         abort_if($current === null, 401);
 
-        return response()->json($current)->header('Cache-Control', 'no-store');
+        $values = (array) $current;
+        foreach (['email_login_enabled', 'username_login_enabled', 'mobile_login_enabled'] as $flag) {
+            $values[$flag] = (bool) $values[$flag];
+        }
+
+        return response()->json($values)->header('Cache-Control', 'no-store');
     }
 
     public function update(Request $request): JsonResponse
