@@ -34,7 +34,7 @@ const LoginV3 = () => {
     <div className='h-dvh lg:grid lg:grid-cols-2'>
       <div className='flex h-full items-center justify-center space-y-6 sm:px-6 md:px-8'>
         <div className='flex w-full flex-col gap-6 p-6 sm:max-w-lg'>
-          <Link href='/'>
+          <Link href='/pages/auth/login-v3'>
             <Logo className='gap-3' />
           </Link>
 
