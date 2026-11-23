@@ -148,4 +148,32 @@ final class LoginIdentifiersTest extends TestCase
             'password' => self::PASSWORD, 'username' => '9876543210',
         ])->assertUnprocessable()->assertJsonValidationErrors('username');
     }
+    public function test_reserved_username_is_rejected(): void
+    {
+        DB::table('reserved_usernames')->insert([
+            'username' => 'administrator',
+            'reserved_at' => now(),
+        ]);
+        $id = $this->user('II1234', 'owner@example.test');
+        $this->actingAs(User::findOrFail($id));
+
+        $this->putJson('/api/v1/me/login-identifiers', [
+            'password' => self::PASSWORD,
+            'username' => 'Administrator',
+            'username_login_enabled' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('username');
+    }
+
+    public function test_reserved_usernames_management_requires_main_portal_authorization(): void
+    {
+        $id = $this->user('JJ1234', 'owner@example.test');
+        $this->actingAs(User::findOrFail($id));
+        $this->getJson('/api/v1/reserved-usernames')->assertForbidden();
+        $this->postJson('/api/v1/reserved-usernames', [
+            'username' => 'administrator',
+        ])->assertForbidden();
+        $this->deleteJson('/api/v1/reserved-usernames/administrator')->assertForbidden();
+        $this->assertDatabaseCount('reserved_usernames', 0);
+    }
+
 }
