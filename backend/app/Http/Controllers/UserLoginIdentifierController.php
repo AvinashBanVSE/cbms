@@ -49,6 +49,8 @@ final class UserLoginIdentifierController
         ]);
 
         $updated = DB::transaction(static function () use ($id, $input): object {
+            // Serialize username reservations and user alias changes.
+            DB::table('portal_installation')->where('id', 1)->lockForUpdate()->first();
             $user = DB::table('users')->where('id', $id)->lockForUpdate()->first();
             abort_if($user === null, 401);
             abort_unless(Hash::check($input['password'], $user->password), 403);
@@ -67,6 +69,12 @@ final class UserLoginIdentifierController
             }
             if (is_string($values['username'])) {
                 $values['username'] = Str::lower($values['username']);
+            }
+            if ($values['username'] !== null
+                && DB::table('reserved_usernames')->where('username', $values['username'])->exists()) {
+                throw ValidationException::withMessages([
+                    'username' => 'This username is reserved.',
+                ]);
             }
             if (($values['username_login_enabled'] && $values['username'] === null)
                 || ($values['mobile_login_enabled'] && $values['mobile_number'] === null)
