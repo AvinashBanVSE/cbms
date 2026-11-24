@@ -136,6 +136,56 @@ final class ShadowComparisonTest extends TestCase
         $this->assertFalse($cutover->allows($user, $shop, 'mapping.approve'));
     }
 
+    public function test_cached_decision_must_not_outlive_a_deny_expiry(): void
+    {
+        [$portal, $shop, $user] = $this->seedShop();
+        config(['authorization.evaluator_decisions_cached' => true, 'authorization.decision_cache_ttl' => 3600]);
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+        AuthorizationVersion::bump($shop);
+
+        $evaluator = new AuthorizationEvaluator;
+        $this->assertContains('mapping.initiate', $evaluator->decide($user, $shop)->allowed);
+
+        // A deny that self-expires (no mutation afterward): the versionKey does not change, so a
+        // purely version-keyed cache would keep serving the pre-expiry allow past expiry.
+        DB::table('entity_permission_denies')->insert([
+            'id' => (string) Str::uuid7(), 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'reason' => 'temporary', 'created_by' => $user,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+        AuthorizationVersion::bump($shop);
+        $this->assertNotContains('mapping.initiate', $evaluator->decide($user, $shop)->allowed, 'deny applies while live');
+
+        // The security-critical direction: a governed carve-out WAIVES the deny, so the decision
+        // is cached as allowed. When that carve-out self-expires the deny returns — but the
+        // versionKey has not changed, so a purely version-keyed cache would keep serving the
+        // expired carve-out's allow. That would restore revoked authority (§41), so the cache
+        // must not outlive the waiver. Bounded-TTL caching accepts this only if TTL is short;
+        // a long TTL here is the defect.
+        $manager = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr2@test.invalid', 'password' => 'x']);
+        DB::table('portal_grants')->insert(['user_id' => $manager, 'business_id' => $portal, 'permission' => 'organization_users.manage']);
+        // Reuse the standing deny above and add a self-expiring carve-out on it.
+        (new DenyExceptions)->save($manager, $shop, $user, [
+            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'short waiver',
+            'expires_at' => now()->addMinutes(2)->toIso8601String(),
+        ]);
+        AuthorizationVersion::bump($shop);
+        $this->assertContains('mapping.initiate', $evaluator->decide($user, $shop)->allowed, 'waived while carve-out live');
+        $ref = new \ReflectionMethod(AuthorizationEvaluator::class, 'soonestExpiry');
+        $ref->setAccessible(true);
+        // The fix's verifiable guarantee: the entry's effective TTL is capped at the soonest
+        // time-bound expiry (the ~2 min waiver), NOT the configured 3600 s. (We assert the
+        // computed lifetime rather than a post-travel read, because the array cache store
+        // expires entries on real wall-clock that travel() does not advance.)
+        $effective = min(3600, $ref->invoke($evaluator, $user, $shop));
+        $this->assertLessThanOrEqual(180, $effective, 'entry must expire by the carve-out expiry, not the configured 3600 s');
+        $this->assertGreaterThan(0, $effective);
+    }
+
     /**
      * @return array{0: string, 1: string, 2: string} portal, shop, user
      */

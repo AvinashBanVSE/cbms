@@ -53,9 +53,47 @@ final class AuthorizationEvaluator
         }
 
         $decision = $this->compute($user, $businessId);
-        Cache::put($key, $decision->toArray(), (int) config('authorization.decision_cache_ttl', 300));
+        // A cached decision must never outlive a live deny or carve-out that later self-expires:
+        // when an expiring waiver lapses the deny returns without any version bump, so a purely
+        // version-keyed cache would keep serving the expired waiver's allow — restoring authority
+        // the policy just revoked. Cap the TTL at the soonest future expiry so the entry is gone
+        // by the time any time-bound row lapses.
+        $ttl = min((int) config('authorization.decision_cache_ttl', 300), $this->soonestExpiry($user, $businessId));
+        if ($ttl <= 0) {
+            return $decision;
+        }
+        Cache::put($key, $decision->toArray(), $ttl);
 
         return $decision;
+    }
+
+    /**
+     * Seconds until the nearest time-bound deny or carve-out for this user/business lapses, or
+     * the full configured TTL when nothing is time-bound. Never longer than the configured TTL.
+     */
+    private function soonestExpiry(string $user, string $businessId): int
+    {
+        $configured = (int) config('authorization.decision_cache_ttl', 300);
+        $denies = DB::table('entity_permission_denies')
+            ->where('business_id', $businessId)->where('user_id', $user)
+            ->whereNotNull('expires_at')->where('expires_at', '>', now())
+            ->orderBy('expires_at')->value('expires_at');
+        $carveouts = DB::table('entity_deny_exceptions')
+            ->join('entity_permission_denies', 'entity_permission_denies.id', '=', 'entity_deny_exceptions.deny_id')
+            ->where('entity_deny_exceptions.business_id', $businessId)
+            ->where('entity_permission_denies.user_id', $user)
+            ->where('entity_deny_exceptions.active', true)
+            ->whereNotNull('entity_deny_exceptions.expires_at')
+            ->where('entity_deny_exceptions.expires_at', '>', now())
+            ->orderBy('entity_deny_exceptions.expires_at')
+            ->value('entity_deny_exceptions.expires_at');
+
+        $soonest = collect([$denies, $carveouts])->filter()->map(fn ($value): int => (int) now()->diffInSeconds($value))->min();
+        if ($soonest === null) {
+            return $configured;
+        }
+
+        return max(1, min($configured, (int) $soonest));
     }
 
     private function compute(string $user, string $businessId): AuthorizationDecision
