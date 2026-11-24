@@ -8,15 +8,15 @@ use Illuminate\Validation\ValidationException;
 
 final class MappingPermissions
 {
-    /**
-     * A User / Role / Delegation / Access assignment may carry at most the full symmetric
-     * mapping verb set (7 actions per kind), so the cap matches the catalogue width.
-     */
-    public const MAX_ACTIONS = 7;
+    public static function maxActions(): int
+    {
+        return max(count(PermissionCatalogue::actions('Shop', 'mapping', true)),
+            count(PermissionCatalogue::actions('Distributor', 'mapping', true)));
+    }
 
     public static function validate(?string $kind, array $actions): void
     {
-        $allowed = $kind === null ? null : (PermissionCatalogue::MAPPING_BY_BUSINESS[$kind] ?? null);
+        $allowed = $kind === null ? null : (in_array($kind, ['Shop', 'Distributor'], true) ? PermissionCatalogue::actions($kind, 'mapping', true) : null);
         if ($allowed === null || array_diff($actions, $allowed)) {
             throw ValidationException::withMessages([
                 'actions' => 'Select permitted actions for a Shop or Distributor in this Organization.',

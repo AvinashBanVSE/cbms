@@ -36,7 +36,7 @@ final class OrganizationDelegationController
         $data = $request->validate([
             'code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/',
             'minutes' => 'required|integer|min:1|max:43200',
-            'actions' => 'required|array|list|max:'.MappingPermissions::MAX_ACTIONS,
+            'actions' => 'required|array|list|max:'.MappingPermissions::maxActions(),
             'actions.*' => 'required|string|distinct',
         ]);
 

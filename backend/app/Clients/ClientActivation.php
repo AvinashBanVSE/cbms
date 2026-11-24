@@ -119,7 +119,7 @@ final class ClientActivation
                 ->join('customer_permissions as permission', function ($join): void {
                     $join->on('permission.user_id', '=', 'account.user_id')
                         ->on('permission.business_id', '=', 'tenant.organization_id')
-                        ->whereIn('permission.action', PermissionCatalogue::TENANT_ADMIN);
+                        ->whereIn('permission.action', PermissionCatalogue::actions('Organization', 'clients'));
                 })
                 ->where('account.user_id', $actor)->where('account.state', 'Active')
                 ->lockForUpdate()->first(['account.tenant_id']);
@@ -212,7 +212,7 @@ final class ClientActivation
             ->join('customer_permissions as permission', function ($join): void {
                 $join->on('permission.user_id', '=', 'account.user_id')
                     ->on('permission.business_id', '=', 'tenant.organization_id')
-                    ->whereIn('permission.action', PermissionCatalogue::TENANT_ADMIN);
+                    ->whereIn('permission.action', PermissionCatalogue::actions('Organization', 'clients'));
             })
             ->where('account.user_id', $actor)->where('account.state', 'Active')
             ->where('account.tenant_id', $tenant)->exists();

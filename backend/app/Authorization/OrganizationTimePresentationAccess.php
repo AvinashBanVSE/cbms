@@ -57,6 +57,7 @@ final class OrganizationTimePresentationAccess
                 $join->on('permission.user_id', '=', 'account.user_id')->on('permission.business_id', '=', 'business.id')
                     ->whereIn('permission.action', $permissions);
             })
+            ->whereIn('permission.action', PermissionCatalogue::actions('Organization'))
             ->where(['account.user_id' => $user, 'account.state' => 'Active', 'business.kind' => 'Organization', 'business.operational_state' => 'Active']);
     }
 

@@ -52,7 +52,7 @@ final class CustomerBusinessAccess
             )
             ->whereColumn('entity.parent_id', 'tenant.organization_id')
             ->where(function (Builder $eligible): void {
-                foreach (PermissionCatalogue::MAPPING_BY_BUSINESS as $kind => $actions) {
+                foreach (PermissionCatalogue::mapping() as $kind => $actions) {
                     $eligible->orWhere(fn (Builder $business) => $business->where('entity.kind', $kind)->whereIn('permission.action', $actions));
                 }
             })

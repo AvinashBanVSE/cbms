@@ -23,7 +23,6 @@ use App\Http\Controllers\CredentialSettingsController;
 use App\Http\Controllers\GlobalBusinessSettingsController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\LegalIdentityController;
-use App\Http\Controllers\UserLoginIdentifierController;
 use App\Http\Controllers\OrganizationAccessController;
 use App\Http\Controllers\OrganizationAccountLifecycleController;
 use App\Http\Controllers\OrganizationCredentialController;
@@ -31,11 +30,13 @@ use App\Http\Controllers\OrganizationDelegationController;
 use App\Http\Controllers\OrganizationMfaController;
 use App\Http\Controllers\OrganizationRoleController;
 use App\Http\Controllers\OrganizationUserController;
+use App\Http\Controllers\PermissionCatalogueController;
 use App\Http\Controllers\ProviderUserController;
 use App\Http\Controllers\ReservedUsernameController;
 use App\Http\Controllers\RoleApprovalController;
 use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
+use App\Http\Controllers\UserLoginIdentifierController;
 use App\Http\Controllers\WorkspaceAccessController;
 use App\Http\Middleware\ValidateOrganizationSession;
 use Illuminate\Http\Request;
@@ -95,6 +96,8 @@ Route::prefix('api/v1')->group(function (): void {
         ->where('setting', 'negative_amount')->whereUuid('business');
     Route::get('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->where('setting', 'negative_amount');
     Route::post('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->where('setting', 'negative_amount');
+    Route::get('authorization/permissions', PermissionCatalogueController::class);
+
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {
         Route::post('installation/setup', [InstallationController::class, 'setup'])->middleware('throttle:5,1,setup');

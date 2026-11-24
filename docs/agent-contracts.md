@@ -2,13 +2,14 @@
 
 This is a source-linked working reference for coding agents, not a design proposal or a repository map. It records only non-obvious contracts that cross modules or stacks and are costly to reconstruct incorrectly.
 
-**Verified source tree:** `5a7cb264a34549135dbd2dd07df3bfccb2424451`
+**Verification:** committed per-file SHA-256 manifest in `docs/agent-contracts.sha256`.
 
-Run `scripts/check-agent-contracts.sh` before relying on this file. A stale result means that one or more cited contract sources changed after the tree above; inspect only the paths reported by the checker and reconcile the affected statements. Source code always wins.
+Run `scripts/check-agent-contracts.sh` before relying on this file. The manifest travels with a clone and does not depend on unpublished Git objects. Reconcile changed source statements before explicitly refreshing it.
 
 ## 1. Identity and authority boundaries
 
 - "Customer" in code means an account belonging to an Organization tenant; it is not an end buyer or shopper. Main Portal, Sub-Portal provider, and Organization customer authority are deliberately separate. A Main Portal grant is unusable when the same user has a provider or customer account; provider directory access is unusable when the user has a customer account. (`backend/app/Authorization/MainPortalAccess.php`, `backend/app/Authorization/ProviderAccess.php`)
+- The authoritative permission definitions and entity applicability are stored in `permission_definitions` and `permission_applicability`; PHP operation checks retain stable codes. Catalogue inactivity denies effective access without deleting historical grants. The initial migration changes no assignments. (`backend/database/migrations/2026_11_24_000052_create_permission_catalogue.php`)
 - Workspace visibility is not action authorization. `workspace-access` exposes only permitted workspace entry keys plus mapping/delegation/onboarding/provider contexts; controllers must still enforce their action permission. `null` entries in the Main Portal catalogue are action-only and must not become menu entries. (`backend/app/Authorization/PermissionCatalogue.php`, `backend/app/Http/Controllers/WorkspaceAccessController.php`)
 - Organization access has two paths: Main Portal authority with `organization_users.manage`, or an active customer delegation. A delegation is valid only for the same tenant, a direct child business, an active recipient account with active association and scope, a current Main Portal issuer, its time window, and every requested allowed action. (`backend/app/Authorization/OrganizationAccessDelegation.php`)
 
@@ -37,25 +38,16 @@ Run `scripts/check-agent-contracts.sh` before relying on this file. A stale resu
 - Desktop activation codes are issued by an active tenant customer with `clients.activate`, are tenant-bound, store only a digest, and are one-time. Consumption is intentionally sessionless but atomically enforces the governed desktop-instance capacity; with no published capacity, activation is denied. (`backend/app/Clients/ClientActivation.php`, `backend/app/Http/Controllers/ClientActivationController.php`)
 - Mobile activation requires a signed-in active customer with `clients.activate` and keeps exactly one active mobile instance per user. Desktop or mobile activation tokens identify an active client instance only; they confer no business permission, so later operations must still authenticate the user and authorize tenant/business access. (`backend/app/Clients/ClientActivation.php`)
 
-## 6. Frontend/backend bridge and page navigation
+## 6. Current frontend bridge
 
-- Portal API traffic remains readable under `/api/v1/*`. Stateful body requests first obtain `/api/v1/csrf`, send `X-CSRF-TOKEN`, include credentials, and use `no-store`; setup additionally sends `X-Setup-Code`. Do not route API calls through page navigation or weaken CSRF/session behavior. (`frontend/src/lib/cbms-api.ts`, `backend/routes/browser.php`)
-- Browser page URLs are opaque for product UX, not security. Page keys are resolved server-side from an HMAC-signed, HTTP-only, SameSite=Strict cookie; entries use UUIDv7-shaped IDs, expire after 15 minutes, and are pruned to eight. Production requires `OPAQUE_NAVIGATION_SECRET`. (`frontend/src/lib/opaque-navigation.ts`, `frontend/src/app/navigation/route.ts`)
-- All client page transitions must request a fresh opaque ID from `/navigation`; readable legacy paths are redirects only. Invalid/expired IDs redirect through `/` to a fresh login ID. Authentication/authorization still comes from Laravel `workspace-access`, not from possession of an opaque ID. `/_next/*` and `/api/v1/*` are outside this page-routing mechanism. (`frontend/src/lib/client-navigation.ts`, `frontend/src/proxy.ts`, `frontend/src/app/[opaqueId]/page.tsx`, `frontend/src/components/auth/AuthenticatedLayout.tsx`)
+- The current frontend is the template-based Next application. Its configured root redirect is `/dashboard/sales`; do not assume opaque navigation or authenticated layout files from an earlier implementation exist. (`frontend/next.config.ts`)
+- Portal installation requests use `/api/v1/installation*`; body requests obtain `/api/v1/csrf`, send `X-CSRF-TOKEN`, include credentials and use `no-store`. Setup writes additionally send `X-Setup-Code`. (`frontend/src/views/pages/onboarding/portal-setup/index.tsx`, `backend/routes/browser.php`)
 
 ## 7. Verification truth
 
 - Backend statement coverage has an executable 90% floor: `composer test:coverage` creates Clover output and fails below 90%. (`backend/composer.json`, `backend/tools/check-coverage.php`)
-- The frontend currently defines build, type-check, lint, and Playwright E2E commands, but no executable percentage-coverage gate. Do not claim frontend 90% coverage from passing E2E alone. (`frontend/package.json`, `frontend/playwright.config.ts`)
+- The current frontend defines build, check-types and lint commands, but no Playwright command or executable percentage-coverage gate. (`frontend/package.json`)
 
-## Refreshing the verified tree
+## Refreshing the source manifest
 
-The agent changing a watched source owns this refresh in the same change:
-
-1. Reconcile every affected statement against the source diff. Update prose/citations only if semantics changed.
-2. Stage all source and reference changes except the `Verified source tree` line.
-3. Run `git write-tree`; this records a tree containing the reviewed source state.
-4. Replace the hash in `Verified source tree` with that output and stage this file. The final tree may differ because this line changed; that is expected because the checker compares only contract sources.
-5. Run `scripts/check-agent-contracts.sh` and the relevant product tests before committing.
-
-Never refresh the hash without reviewing the paths reported by the checker.
+The agent changing a watched source owns reconciliation in the same change. Inspect the source diff, update affected statements and citations, and update the explicit watched-source list when necessary. Then run `bash scripts/check-agent-contracts.sh --refresh`, inspect the manifest diff, and run the checker and relevant tests before committing. Commit the manifest alongside the source and reference. Never refresh merely to silence a failure.

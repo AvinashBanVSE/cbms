@@ -4,44 +4,36 @@ declare(strict_types=1);
 
 namespace App\Authorization;
 
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
+
 final class PermissionCatalogue
 {
-    /**
-     * Workspace entry permissions are distinct from permissions for the actions inside it.
-     */
-    public const MAIN_PORTAL = [
-        'service_catalogue.view' => 'services',
-        'service_catalogue.create' => null,
-        'business_structure.view' => 'businesses',
-        'business_structure.create' => null,
-        'business_identity.verify' => 'identities',
-        'business_structure.lifecycle' => null,
-        'business_structure.closure_policy' => null,
-        'service_provider.migrate' => null,
-        'organization_users.manage' => 'users',
-        'commercial.manage' => 'commercial',
-        'organization_roles.approval_policy' => null,
-        'provider_users.manage' => 'provider_users',
-        'audit_trail.view' => 'audit',
-        'global_business_settings.view' => 'business_settings',
-        'global_business_settings.manage' => null,
-    ];
+    public static function applicable(string $kind): Builder
+    {
+        return DB::table('permission_definitions as definition')
+            ->join('permission_applicability as applicability', 'applicability.permission_id', '=', 'definition.id')
+            ->where('definition.active', true)->where('applicability.entity_kind', $kind);
+    }
 
-    public const MAPPING_BY_BUSINESS = [
-        // Both kinds share the same verbs: either may initiate, verify, confirm, end,
-        // reject or withdraw, and either may view history. The role a party holds on a
-        // given request (Initiator vs. Recipient) is derived from the mapping record, so
-        // no privilege asymmetry is encoded here (§4.2).
-        'Shop' => ['mapping.initiate', 'mapping.verify', 'mapping.confirm', 'mapping.end',
-            'mapping.reject', 'mapping.withdraw', 'mapping.history.view'],
-        'Distributor' => ['mapping.initiate', 'mapping.verify', 'mapping.confirm', 'mapping.end',
-            'mapping.reject', 'mapping.withdraw', 'mapping.history.view'],
-    ];
+    /** @return array<string, string|null> */
+    public static function mainPortal(): array
+    {
+        return self::applicable('Main Portal')->pluck('applicability.workspace', 'definition.code')->all();
+    }
 
-    /**
-     * The explicitly permitted workflow that governs first-party client activation (§6D.7).
-     * Authorized against a Tenant's own Parent Organization, as a Tenant Owner/Admin action;
-     * it never confers a business permission and stays separate from action authorization.
-     */
-    public const TENANT_ADMIN = ['clients.activate'];
+    /** @return list<string> */
+    public static function actions(string $kind, ?string $domain = null, bool $assignable = false): array
+    {
+        return self::applicable($kind)
+            ->when($domain !== null, fn (Builder $query) => $query->where('definition.domain', $domain))
+            ->when($assignable, fn (Builder $query) => $query->where('definition.assignable', true))
+            ->orderBy('definition.code')->pluck('definition.code')->all();
+    }
+
+    /** @return array<string, list<string>> */
+    public static function mapping(): array
+    {
+        return ['Shop' => self::actions('Shop', 'mapping'), 'Distributor' => self::actions('Distributor', 'mapping')];
+    }
 }
