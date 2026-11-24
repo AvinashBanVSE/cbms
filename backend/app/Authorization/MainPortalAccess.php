@@ -24,7 +24,11 @@ final class MainPortalAccess
 
     public function grantsFor(string $user): Builder
     {
-        return DB::table('portal_grants')
+        $roles = DB::table('users as subject')->crossJoinSub(EntityRoleAccess::permissionsFor($user), 'roles')
+            ->where('subject.id', $user)->select('subject.id as user_id', 'roles.business_id', 'roles.action as permission');
+        $grants = DB::table('portal_grants')->where('user_id', $user)->select('user_id', 'business_id', 'permission')->union($roles);
+
+        return DB::query()->fromSub($grants, 'portal_grants')
             ->join('portal_installation as installation', 'installation.portal_id', '=', 'portal_grants.business_id')
             ->where('installation.id', 1)->where('installation.stage', 'ready')->where('portal_grants.user_id', $user)
             ->whereIn('portal_grants.permission', array_keys(PermissionCatalogue::mainPortal()))

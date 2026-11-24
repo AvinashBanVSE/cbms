@@ -50,7 +50,7 @@ final class OrganizationOnboardingAccess
                     ->where('association.active', true);
             })->join('customer_business_scopes as scope', function ($join): void {
                 $join->on('scope.user_id', '=', 'account.user_id')->on('scope.business_id', '=', 'organization.id');
-            })->join('customer_permissions as permission', function ($join) use ($permission): void {
+            })->joinSub(CustomerPermissionGrants::forUser($user), 'permission', function ($join) use ($permission): void {
                 $join->on('permission.user_id', '=', 'account.user_id')->on('permission.business_id', '=', 'organization.id')
                     ->where('permission.action', $permission);
             })

@@ -18,13 +18,18 @@ final class ProviderAccess
 
     public function directoryScope(string $user): Builder
     {
+        $direct = DB::table('provider_account_permissions as grant')
+            ->join('provider_accounts as account', 'account.user_id', '=', 'grant.user_id')
+            ->where('account.user_id', $user)->select('account.provider_id as business_id', 'grant.permission as action')
+            ->union(EntityRoleAccess::permissionsFor($user));
+
         return DB::table('provider_accounts as account')
             ->join('business_identities as provider', 'provider.id', '=', 'account.provider_id')
-            ->join('provider_account_permissions as grant', 'grant.user_id', '=', 'account.user_id')
+            ->joinSub($direct, 'grant', 'grant.business_id', '=', 'provider.id')
             ->where('account.user_id', $user)->where('account.state', 'Active')
             ->where('provider.kind', 'Sub-Portal')->where('provider.operational_state', 'Active')
-            ->where('grant.permission', self::DIRECTORY)
-            ->whereIn('grant.permission', PermissionCatalogue::actions('Sub-Portal'))
+            ->where('grant.action', self::DIRECTORY)
+            ->whereIn('grant.action', PermissionCatalogue::actions('Sub-Portal'))
             ->whereNotExists(fn ($accounts) => $accounts->selectRaw('1')->from('customer_accounts')->where('user_id', $user));
     }
 
