@@ -186,6 +186,40 @@ final class ShadowComparisonTest extends TestCase
         $this->assertGreaterThan(0, $effective);
     }
 
+    public function test_lapsed_carve_out_stops_waiving_the_deny(): void
+    {
+        // A carve-out whose expires_at is already in the PAST must not keep waiving the standing
+        // deny. This is the mirror of the allow->deny direction: the evaluator's carve-out
+        // subquery compares against now(), so a lapsed waiver drops back to deny. (Seeded lapsed
+        // directly rather than via travel(), whose mocked now() and the stored UTC instant can
+        // disagree by the app offset and mask the real comparison.)
+        [$portal, $shop, $user] = $this->seedShop();
+        $manager = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr3@test.invalid', 'password' => 'x']);
+        DB::table('portal_grants')->insert(['user_id' => $manager, 'business_id' => $portal, 'permission' => 'organization_users.manage']);
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+        DB::table('customer_permissions')->insert(['user_id' => $user, 'business_id' => $shop, 'action' => 'mapping.initiate']);
+        $denyId = (string) Str::uuid7();
+        DB::table('entity_permission_denies')->insert([
+            'id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'reason' => 'hold', 'created_by' => $manager,
+        ]);
+        DB::table('entity_deny_exceptions')->insert([
+            'id' => (string) Str::uuid7(), 'deny_id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'lapsed waiver',
+            'granted_by' => $manager, 'active' => true, 'version' => 1,
+            'expires_at' => now()->subMinutes(5),
+        ]);
+        AuthorizationVersion::bump($shop);
+
+        $this->assertNotContains('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed,
+            'a carve-out that has lapsed must stop waiving the standing deny'
+        );
+    }
+
     /**
      * @return array{0: string, 1: string, 2: string} portal, shop, user
      */
