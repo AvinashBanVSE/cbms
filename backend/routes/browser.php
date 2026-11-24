@@ -38,6 +38,7 @@ use App\Http\Controllers\ReservedUsernameController;
 use App\Http\Controllers\RoleApprovalController;
 use App\Http\Controllers\ServiceProviderMigrationController;
 use App\Http\Controllers\ServiceRegistryController;
+use App\Http\Controllers\ShadowComparisonController;
 use App\Http\Controllers\UserLoginIdentifierController;
 use App\Http\Controllers\WorkspaceAccessController;
 use App\Http\Middleware\ValidateOrganizationSession;
@@ -50,6 +51,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
     Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::post('authorization/shadow-comparison', ShadowComparisonController::class)->middleware('throttle:20,1,shadow-comparison');
     Route::get('authorization-context', AuthorizationContextController::class);
     Route::get('authenticator', [AuthenticatorController::class, 'show']);
     Route::post('authenticator/prepare', [AuthenticatorController::class, 'prepare'])->middleware('throttle:5,1,authenticator-prepare');

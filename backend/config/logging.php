@@ -128,6 +128,16 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Shadow-mode authorization comparison (plan §6). Separate channel so the pre-cutover parity
+        // evidence is easy to collect and prune without touching application logs.
+        'shadow' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/shadow-comparison.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => env('LOG_SHADOW_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
         'null' => [
             'driver' => 'monolog',
             'handler' => NullHandler::class,
