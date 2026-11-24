@@ -1,23 +1,35 @@
 # Authorization implementation status — 2026-11-24
 
-The user approved all policy decisions and authorized implementation. Delivery remains staged so that each authorization change is reviewable and verified. No deployment or production migration has been performed.
+The user approved all policy decisions and authorized implementation. Delivery is staged so that each authorization change is reviewable and verified. No deployment or production migration has been performed.
 
 ## Completed foundation increment
 
-- Database-backed catalogue: 31 unique permission definitions with separate entity applicability. Existing operation codes and workspace mappings are preserved. Roles/grants/scopes are not copied, widened or reassigned by the migration.
-- Existing portal, mapping, organization onboarding/presentation, provider-directory and client-activation checks consult active catalogue definitions. Mapping assignment validation derives its size from eligible database permissions instead of the literal seven. An unassignable definition cannot be added through mapping assignment validation; existing grants continue until revoked or the definition is inactive.
-- Protected read endpoint: GET /api/v1/authorization/permissions requires existing organization_users.manage authority. No permission-editing endpoint is exposed before the approved approval/grant-governance workflow is implemented.
-- Contract checker uses a committed source checksum manifest instead of an unpublished Git tree. Removed absent frontend references and reconciled the current template frontend description. Refresh is explicit and owned by the source-changing agent.
-- Policy ratification recorded. The existing architecture is retained during this increment; this is not a complete central evaluator or entity role cutover.
+- Database permission catalogue and entity applicability, preserving existing operation codes and grants.
+- Protected catalogue read API and catalogue-derived assignment validation.
+- Contract verification repaired with a committed source checksum manifest; absent frontend references reconciled.
+
+## Completed entity-role backend increment
+
+- Existing role tables extended to support Main Portal, Sub-Portal, Organization, Distributor and Shop, with independent names/contents per entity and versioned governed roles.
+- Explicit grant-authority limits separate from use permissions. Scoped local role managers can create and assign only eligible permissions they may grant. Existing Main Portal administrative authority governs initialization without silently assigning new powers during migration.
+- Entity role APIs for listing, creation, versioned editing, assignment, immediate reasoned emergency revocation, approval inbox/decisions and independent template-style copy. Assigned roles must be revoked before content edits in this increment.
+- Separate current association/scope checks and account/lifecycle restrictions. Existing customer scopes are retained. Explicit platform/provider self scopes mirror already-issued authority and are recorded at normal bootstrap/provisioning. Role assignment creates no scope or membership.
+- Privileged assignment requires independent review. Existing configurable assignment stages, sequential/parallel counts, reviewer/beneficiary exclusions, expiry, current authority rechecks, audit events and snapshot invalidation are implemented. Management approval cannot be disabled by changing its catalogue flag.
+- Role grants integrated with existing portal, provider, mapping, organization onboarding/presentation and client-administration checks. Eligibility is applied in SQL without per-entity permission-fetch loops or a stale authorization cache.
+- Governed roles cannot be assigned through the legacy endpoint. Legacy rows and existing assignments remain intact; no bulk conversion or privilege expansion is performed.
+
+See entity-role-api.md for payloads, boundaries and migration details.
 
 ## Validation
 
-PHP 8.4, locked Composer dependencies, 94 tests and 1,665 assertions pass. New tests cover entity applicability isolation, assignment eligibility, permission retirement, endpoint authorization, unknown/wrong-context grants and migration grant preservation. PCOV statement coverage: 91.81% (3,463 / 3,772); repository 90% gate passes. Pint and diff whitespace checks pass. Contract checker tested in an isolated Git repository without historic Git objects, including mutated and missing watched sources.
+PHP 8.4 with locked Composer dependencies; SQLite automated suite: **108 tests, 1,822 assertions passed**. PCOV statement coverage **92.10% (3,789 / 4,114)**; repository 90% gate passes. Pint, diff checks and refreshed contract verification pass.
+
+Security coverage includes all five entity kinds, same-name independence, grant ceilings, use-versus-grant distinction, tenant isolation, missing/removed scope, account state changes, legacy bypass rejection, stale role versions, assigned-role edit rejection, self/beneficiary approval rejection, distinct votes and sequential stages, expiry/rejection, repeated execution, policy/catalogue changes invalidating requests, reviewer-only inboxes, independent copies and client-administration role integration. A populated pre-upgrade database test verifies legacy permissions/assignments/scopes are preserved. PostgreSQL concurrency/load testing and frontend E2E are not claimed by this SQLite suite.
 
 ## Remaining approved work
 
-Complete schema and migration mapping for independent roles in all five entity contexts; explicit scope selectors and exclusions; direct deny and approved expiry; role/scope grant ceilings; versioned central evaluation; required approval escalation and template copy; configuration governance and frontend administration; parity/shadow comparison, cache/job invalidation and controlled cutover. Existing role administration remains portal-controlled until that stage is implemented and verified. No dynamic scopes or direct-deny user controls are enabled by this increment.
+Direct Deny and approved deny expiry; selected/snapshot/excluded/future entity scope selectors; owner-linked/purpose-limited cross-entity policy evaluation; full policy precedence and configuration editors; atomic edits of assigned roles through an approval workflow; governed permission-catalogue writes; frontend administration; queued-work/caching integration; full shadow comparison and controlled cutover. Existing portal-wide administrative operations and provider-directory meanings have not been narrowed into per-record scope by this increment.
 
 ## Migration and rollback boundary
 
-Deploy the additive catalogue migration before serving this code. A missing catalogue fails rather than falling back to a hardcoded list. Take the normal database backup and compare existing grant/role/scope counts before/after. Down migration removes only catalogue tables, but must never be used as a live authorization rollback: older code would ignore any catalogue restrictions introduced after cutover. Roll forward or reconcile restrictions before a coordinated restoration. No production permission changes should be performed directly in SQL as a substitute for the pending governed administration workflow.
+Deploy migrations 000052 and 000053 before serving this code. A missing catalogue fails rather than reverting to a hardcoded list. Take a database backup and compare existing role/grant/scope records before/after. Migration 000053 refuses automatic down migration: dropping its authority/restriction records or returning to code that ignores them is not a safe live rollback. Use a reviewed forward correction or reconcile all intervening revocations before coordinated restoration. No SQL permission edits should substitute for the pending governed catalogue editor.

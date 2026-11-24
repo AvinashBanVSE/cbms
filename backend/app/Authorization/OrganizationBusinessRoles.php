@@ -14,8 +14,8 @@ final class OrganizationBusinessRoles
         return DB::table('organization_role_assignments as assignment')
             ->join('organization_business_roles as role', 'role.id', '=', 'assignment.role_id')
             ->join('organization_role_permissions as action', 'action.role_id', '=', 'role.id')
-            ->where('assignment.user_id', $user)
-            ->select('role.business_id', 'action.action');
+            ->where('assignment.user_id', $user)->where('role.governed', false)
+            ->select('role.business_id', 'action.action')->union(EntityRoleAccess::permissionsFor($user));
     }
 
     public static function businessKind(string $tenant, string $business): string

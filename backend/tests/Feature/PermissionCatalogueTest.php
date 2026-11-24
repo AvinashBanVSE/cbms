@@ -54,7 +54,7 @@ final class PermissionCatalogueTest extends TestCase
         $this->getJson('/api/v1/authorization/permissions')->assertUnauthorized();
         $user = $this->portalUser();
         $this->actingAs($user)->getJson('/api/v1/authorization/permissions')->assertOk()
-            ->assertHeader('Cache-Control', 'no-store, private')->assertJsonCount(31, 'data');
+            ->assertHeader('Cache-Control', 'no-store, private')->assertJsonCount(33, 'data');
         DB::table('portal_grants')->where('user_id', $user->id)->delete();
         $this->getJson('/api/v1/authorization/permissions')->assertForbidden();
     }

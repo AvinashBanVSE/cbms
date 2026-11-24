@@ -75,7 +75,7 @@ final class OrganizationRoleController
     {
         $this->access->requirePermission('organization_users.manage');
         OrganizationBusinessRoles::businessKind($tenant, $business);
-        abort_unless(DB::table('organization_business_roles')->where(['id' => $role, 'business_id' => $business])->exists(), 404);
+        abort_unless(DB::table('organization_business_roles')->where(['id' => $role, 'business_id' => $business, 'governed' => false])->exists(), 404);
         $data = $request->validate(['code' => 'required|regex:/^[A-Z]{2}[0-9]{4}$/']);
 
         return DB::transaction(function () use ($tenant, $business, $role, $assigned, $data): JsonResponse {
