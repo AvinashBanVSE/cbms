@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Authorization\AuthorizationCutover;
 use App\Authorization\AuthorizationEvaluator;
 use App\Authorization\AuthorizationVersion;
 use App\Authorization\ShadowComparison;
@@ -75,6 +76,30 @@ final class ShadowComparisonTest extends TestCase
         $this->assertNotNull(Cache::get($key));
         Cache::forget($key);
         $this->assertNull(Cache::get($key));
+    }
+
+    public function test_cutover_gate_is_off_by_default_and_bounded_to_listed_businesses(): void
+    {
+        [$portal, $shop, $user] = $this->seedShop();
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+
+        // Default: flag off -> legacy authority, cutover reports not enforced.
+        $cutover = new AuthorizationCutover(new AuthorizationEvaluator);
+        $this->assertFalse($cutover->enforced($shop));
+
+        // Flag on but business not in the bounded set -> still not enforced.
+        config(['authorization.evaluator_enforced' => true]);
+        $this->assertFalse($cutover->enforced($shop));
+
+        // Flag on and the business is in the bounded set -> evaluator is authoritative, and a
+        // granted action answers allow while a revoked one answers deny (fail closed on unknown).
+        config(['authorization.enforced_businesses' => [$shop]]);
+        $this->assertTrue($cutover->enforced($shop));
+        $this->assertTrue($cutover->allows($user, $shop, 'mapping.initiate'));
+        $this->assertFalse($cutover->allows($user, $shop, 'mapping.approve'));
     }
 
     /**
