@@ -32,7 +32,19 @@ final class EntityRoleController
 
     public function update(Request $request, string $business, string $role): JsonResponse
     {
-        return $this->save($request, $business, $role);
+        $actor = $this->actor();
+        $this->roles->requireManager($actor, $business);
+        $data = $request->validate([
+            'name' => 'required|string|max:100',
+            'actions' => 'present|array|list', 'actions.*' => 'required|string|distinct',
+            'grant_actions' => 'present|array|list', 'grant_actions.*' => 'required|string|distinct',
+            'expected_version' => 'required|integer|min:1',
+        ]);
+        $result = $this->roles->update($actor, $business, $role, $data);
+
+        // A direct edit of an unassigned role returns the role; an assigned-role edit enters the
+        // approval workflow, so it is Accepted rather than Done.
+        return response()->json($result, ($result['status'] ?? null) === 'pending' ? 202 : 200);
     }
 
     private function save(Request $request, string $business, ?string $role = null): JsonResponse

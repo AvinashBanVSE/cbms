@@ -146,8 +146,20 @@ final class EntityRolesTest extends TestCase
         $this->actingAs($this->owner);
         $this->assign($shop, $role, $user)->assertConflict();
         $this->postJson($this->url($shop).'/'.$role.'/assign', ['code' => $user->code, 'expected_version' => 2])->assertOk();
+        // Now that the role is assigned, an edit no longer changes it directly (409); it enters the
+        // governed approval workflow instead (D3: evaluated against every affected assignment).
         $body['expected_version'] = 2;
-        $this->putJson($this->url($shop).'/'.$role, $body)->assertConflict();
+        DB::table('role_approval_policies')->insert(['business_id' => $shop, 'operation' => 'edit', 'stages' => json_encode([['reviewers' => [$this->reviewer->id], 'required' => 1]])]);
+        $editId = $this->putJson($this->url($shop).'/'.$role, $body)->assertAccepted()->json('id');
+        $this->assertDatabaseHas('entity_role_changes', ['id' => $editId, 'status' => 'pending']);
+        $this->actingAs($this->reviewer)->postJson($this->url($shop).'/approvals/'.$editId.'/decision', ['decision' => 'approve'])
+            ->assertOk()->assertJsonPath('status', 'approved');
+        $this->assertDatabaseHas('organization_role_permissions', ['role_id' => $role, 'action' => 'mapping.initiate']);
+        $this->assertSame(3, (int) DB::table('organization_business_roles')->where('id', $role)->value('version'));
+        $this->assertDatabaseCount('organization_role_assignments', 1);
+        // The approved edit cannot be replayed.
+        $this->actingAs($this->reviewer)->postJson($this->url($shop).'/approvals/'.$editId.'/decision', ['decision' => 'approve'])
+            ->assertConflict();
     }
 
     public function test_approval_requires_current_independent_authority_and_is_not_replayable(): void

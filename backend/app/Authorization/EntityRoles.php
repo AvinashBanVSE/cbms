@@ -148,6 +148,56 @@ final class EntityRoles
         }, attempts: 3);
     }
 
+    /**
+     * D3: permission editing on an ASSIGNED role is evaluated against every affected assignment
+     * through approval, instead of the earlier flat block. The proposed contents are frozen in the
+     * request (`edit_payload`) and are NOT applied until an independent approval completes, so a
+     * pending edit never expands authority early. Requires an approval policy for the `edit`
+     * operation; with no policy the edit is refused rather than silently auto-approved.
+     */
+    public function requestEdit(string $actor, string $business, string $role, array $data): array
+    {
+        return DB::transaction(function () use ($actor, $business, $role, $data): array {
+            $this->lock($business);
+            $entity = $this->requireManager($actor, $business);
+            $current = $this->role($business, $role);
+            abort_unless(! $current->archived && (int) $current->version === (int) $data['expected_version'], 409, 'Reload the role before editing.');
+            $this->validateContents($actor, $business, $entity->kind, $data);
+            // The reason this goes through approval at all: the role is already held by someone.
+            abort_if(DB::table('organization_role_assignments')->where('role_id', $role)->doesntExist(), 409, 'Edit unassigned roles directly.');
+
+            $binding = ['role_id' => $role, 'user_id' => null];
+            // Any prior pending edit/assignment on this role is superseded.
+            DB::table('entity_role_changes')->where('role_id', $role)->where('status', 'pending')->update(['status' => 'invalidated']);
+
+            $policy = DB::table('role_approval_policies')->where(['business_id' => $business, 'operation' => 'edit'])->first();
+            abort_if($policy === null, 422, 'No approval policy for editing an assigned role.');
+            $stages = json_decode($policy->stages, true, flags: JSON_THROW_ON_ERROR);
+            $actions = array_unique([...$data['actions'], ...$data['grant_actions']]);
+            foreach ($stages as $stage) {
+                $eligible = array_filter(array_unique($stage['reviewers']), fn (string $id): bool => $id !== $actor && $this->access->canApprove($id, $business, $actions));
+                abort_if($stage['required'] < 1 || count($eligible) < $stage['required'], 422, 'The approval policy needs enough eligible independent reviewers.');
+            }
+
+            $id = (string) Str::uuid7();
+            $fingerprint = $this->fingerprint($business, $role, $actor, $actor);
+            DB::table('entity_role_changes')->insert([
+                'id' => $id, ...$binding, 'requester_id' => $actor, 'role_version' => (int) $current->version,
+                'edit_payload' => json_encode(['name' => $data['name'], 'actions' => $data['actions'], 'grant_actions' => $data['grant_actions']], JSON_THROW_ON_ERROR),
+                'fingerprint' => $fingerprint, 'stages' => json_encode($stages, JSON_THROW_ON_ERROR), 'status' => 'pending',
+                'expires_at' => $policy->expiry_minutes === null ? null : now()->addMinutes($policy->expiry_minutes),
+            ]);
+            foreach ($stages as $index => $stage) {
+                foreach (array_unique($stage['reviewers']) as $reviewer) {
+                    DB::table('entity_role_reviewers')->insert(['change_id' => $id, 'stage' => $index, 'user_id' => $reviewer]);
+                }
+            }
+            $this->audit->audit('entity_role.edit_requested', $id, $actor, ['business_id' => $business, 'role_id' => $role, 'role_version' => (int) $current->version]);
+
+            return ['status' => 'pending', 'id' => $id];
+        }, attempts: 3);
+    }
+
     public function decide(string $actor, string $business, string $id, string $decision): array
     {
         return DB::transaction(function () use ($actor, $business, $id, $decision): array {
@@ -156,20 +206,27 @@ final class EntityRoles
             abort_if($request === null, 404);
             $role = $this->role($business, $request->role_id);
             abort_unless($request->status === 'pending', 409);
-            $contents = $this->contents($role->id);
+            // An EDIT request carries its own frozen proposed contents; an ASSIGNMENT evaluates the
+            // role's current contents (D3). The actions used for approver authority come from that set.
+            $isEdit = $request->edit_payload !== null;
+            $contents = $isEdit
+                ? $this->editPayload($request->edit_payload)
+                : $this->contents($role->id);
             $actions = array_unique([...$contents['actions'], ...$contents['grant_actions']]);
             $stages = json_decode($request->stages, true, flags: JSON_THROW_ON_ERROR);
             $stage = $stages[$request->stage];
-            abort_unless($actor !== $request->requester_id && $actor !== $request->user_id
+            // Requester and beneficiary may never approve; an edit has no beneficiary.
+            abort_unless($actor !== $request->requester_id
+                && ($request->user_id === null || $actor !== $request->user_id)
                 && in_array($actor, $stage['reviewers'], true) && $this->access->canApprove($actor, $business, $actions), 403);
             $status = null;
             if ($request->expires_at !== null && now()->gte($request->expires_at)) {
                 $status = 'expired';
             } elseif ($role->archived || $role->version !== $request->role_version
-                || ! hash_equals($request->fingerprint, $this->fingerprint($business, $role->id, $request->requester_id, $request->user_id))
+                || ! hash_equals($request->fingerprint, $this->fingerprint($business, $role->id, $request->requester_id, $request->user_id ?? $request->requester_id))
                 || ! $this->access->manages($request->requester_id, $business)
                 || ! $this->access->canGrant($request->requester_id, $business, $actions)
-                || ! $this->access->eligible($request->user_id, $business)) {
+                || ($request->user_id !== null && ! $this->access->eligible($request->user_id, $business))) {
                 $status = 'invalidated';
             } elseif ($decision === 'reject') {
                 $status = 'rejected';
@@ -180,7 +237,12 @@ final class EntityRoles
 
                 return ['status' => $status];
             }
-            $this->validateContents($request->requester_id, $business, DB::table('business_identities')->where('id', $business)->value('kind'), $contents);
+            // For an edit the frozen payload was validated at request time and the requester's grant
+            // authority is re-derived from the payload; validateContents is skipped because it would
+            // otherwise compare the proposed actions against the role's not-yet-updated current state.
+            if (! $isEdit) {
+                $this->validateContents($request->requester_id, $business, DB::table('business_identities')->where('id', $business)->value('kind'), $contents);
+            }
             $vote = ['change_id' => $id, 'stage' => $request->stage, 'user_id' => $actor];
             abort_if(DB::table('entity_role_votes')->where($vote)->exists(), 409);
             DB::table('entity_role_votes')->insert($vote);
@@ -204,12 +266,31 @@ final class EntityRoles
 
                 return ['status' => 'pending', 'stage' => $request->stage + 1];
             }
-            $this->apply($business, $role->id, $request->user_id, $request->requester_id);
+            if ($isEdit) {
+                $this->applyEdit($business, $role->id, $actor, $contents);
+            } else {
+                $this->apply($business, $role->id, $request->user_id, $request->requester_id);
+            }
             DB::table('entity_role_changes')->where('id', $id)->update(['status' => 'approved']);
             $this->audit->audit('entity_role.approval_finished', $id, $actor, ['status' => 'approved']);
 
             return ['status' => 'approved'];
         }, attempts: 3);
+    }
+
+    /**
+     * D3: the governed entry point for editing a role. An unassigned role is edited directly; an
+     * assigned role's permission edit goes through approval so it is evaluated against every
+     * affected assignment rather than requiring assignments to be revoked first.
+     */
+    public function update(string $actor, string $business, string $role, array $data): array
+    {
+        $this->lock($business);
+        $assigned = DB::table('organization_role_assignments')->where('role_id', $role)->exists();
+
+        return $assigned
+            ? $this->requestEdit($actor, $business, $role, $data)
+            : $this->save($actor, $business, $data, $role);
     }
 
     public function revoke(string $actor, string $business, string $role, string $user, string $reason): void
@@ -263,7 +344,7 @@ final class EntityRoles
         abort_if($data['grant_actions'] !== [] && ! $this->access->portal($actor), 403);
     }
 
-    private function fingerprint(string $business, string $role, string $actor, string $user): string
+    private function fingerprint(string $business, string $role, string $actor, ?string $user): string
     {
         $state = [
             DB::table('entity_authorization_versions')->where('business_id', $business)->value('version'),
@@ -272,7 +353,7 @@ final class EntityRoles
             DB::table('permission_applicability')->orderBy('permission_id')->orderBy('entity_kind')->get()->all(),
             DB::table('role_approval_policies')->where('business_id', $business)->orderBy('operation')->get()->all(),
         ];
-        foreach ([$actor, $user] as $id) {
+        foreach (array_filter([$actor, $user]) as $id) {
             foreach (['portal_grants', 'provider_accounts', 'provider_account_permissions', 'customer_accounts', 'customer_business_associations', 'customer_business_scopes', 'entity_user_scopes', 'organization_role_assignments'] as $table) {
                 $state[] = DB::table($table)->where('user_id', $id)->get()
                     ->map(fn (object $row): string => json_encode($row, JSON_THROW_ON_ERROR))->sort()->values()->all();
@@ -286,6 +367,39 @@ final class EntityRoles
     {
         DB::table('organization_role_assignments')->insertOrIgnore(['role_id' => $role, 'user_id' => $user]);
         $this->changed($business, $actor, $role, 'assigned', ['user_id' => $user]);
+    }
+
+    /** @return array{name: string, actions: list<string>, grant_actions: list<string>} */
+    private function editPayload(string $payload): array
+    {
+        $decoded = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
+
+        return [
+            'name' => (string) $decoded['name'],
+            'actions' => array_values(array_map(strval(...), $decoded['actions'])),
+            'grant_actions' => array_values(array_map(strval(...), $decoded['grant_actions'])),
+        ];
+    }
+
+    /**
+     * Apply an approved edit to an assigned role. Because the role is held by assignees, this bumps
+     * the role version (invalidating the assignments' cached evaluation) while preserving the
+     * assignment rows — the governed consequence D3 requires for editing an assigned role.
+     *
+     * @param  array{name: string, actions: list<string>, grant_actions: list<string>}  $contents
+     */
+    private function applyEdit(string $business, string $role, string $actor, array $contents): void
+    {
+        $version = (int) DB::table('organization_business_roles')->where('id', $role)->lockForUpdate()->value('version') + 1;
+        DB::table('organization_business_roles')->where('id', $role)->update(['name' => $contents['name'], 'version' => $version]);
+        DB::table('organization_role_permissions')->where('role_id', $role)->delete();
+        DB::table('entity_role_grant_limits')->where('role_id', $role)->delete();
+        foreach (['actions' => 'organization_role_permissions', 'grant_actions' => 'entity_role_grant_limits'] as $field => $table) {
+            foreach ($contents[$field] as $action) {
+                DB::table($table)->insertOrIgnore(['role_id' => $role, 'action' => $action]);
+            }
+        }
+        $this->changed($business, $actor, $role, 'edited', ['version' => $version, ...$contents]);
     }
 
     private function lock(string $business): void

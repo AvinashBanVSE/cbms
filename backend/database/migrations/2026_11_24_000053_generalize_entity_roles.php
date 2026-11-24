@@ -54,9 +54,13 @@ return new class extends Migration
         Schema::create('entity_role_changes', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('role_id')->constrained('organization_business_roles');
-            $table->foreignUuid('user_id')->constrained('users');
+            // Nullable: an ASSIGNMENT request names its beneficiary, an EDIT request has none (D3).
+            $table->foreignUuid('user_id')->nullable()->constrained('users');
             $table->foreignUuid('requester_id')->constrained('users');
             $table->unsignedInteger('role_version');
+            // Non-null marks an EDIT of an assigned role, carrying its frozen proposed contents;
+            // null is the original assignment request.
+            $table->json('edit_payload')->nullable();
             $table->string('fingerprint', 64);
             $table->json('stages');
             $table->unsignedInteger('stage')->default(0);
