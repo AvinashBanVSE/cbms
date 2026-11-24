@@ -48,7 +48,7 @@ Ownership transfer is the same class of high-impact change, so the proposal reus
 ## 4. Proposal
 
 ### 4.1 New permission verb
-Add `business_structure.ownership` to `PermissionCatalogue::MAIN_PORTAL` (workspace entry `null`, action-only). Configure closure-style policy to name authorized reviewers.
+If this proposal is approved, register `business_structure.ownership` through the database-backed permission catalogue and Main Portal applicability (workspace entry `null`, action-only), with a matching implemented operation binding. Configure closure-style policy to name authorized reviewers. Do not reintroduce a PHP permission catalogue.
 
 ### 4.2 Two commands, both approval-gated
 

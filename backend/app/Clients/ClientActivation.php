@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Clients;
 
+use App\Authorization\CustomerPermissionGrants;
 use App\Authorization\PermissionCatalogue;
 use App\Commercial\UsageMeasurement;
 use Illuminate\Support\Facades\DB;
@@ -116,7 +117,7 @@ final class ClientActivation
         return DB::transaction(function () use ($actor, $deviceLabel, $client): array {
             $account = DB::table('customer_accounts as account')
                 ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
-                ->join('customer_permissions as permission', function ($join): void {
+                ->joinSub(CustomerPermissionGrants::forUser($actor), 'permission', function ($join): void {
                     $join->on('permission.user_id', '=', 'account.user_id')
                         ->on('permission.business_id', '=', 'tenant.organization_id')
                         ->whereIn('permission.action', PermissionCatalogue::actions('Organization', 'clients'));
@@ -209,7 +210,7 @@ final class ClientActivation
     {
         $permitted = DB::table('customer_accounts as account')
             ->join('customer_tenants as tenant', 'tenant.id', '=', 'account.tenant_id')
-            ->join('customer_permissions as permission', function ($join): void {
+            ->joinSub(CustomerPermissionGrants::forUser($actor), 'permission', function ($join): void {
                 $join->on('permission.user_id', '=', 'account.user_id')
                     ->on('permission.business_id', '=', 'tenant.organization_id')
                     ->whereIn('permission.action', PermissionCatalogue::actions('Organization', 'clients'));

@@ -40,6 +40,7 @@ final class ProviderUserController
             DB::table('users')->insert(['id' => $user, 'code' => $code, 'email' => $email, 'password' => Hash::make(Str::random(64))]);
             DB::table('provider_accounts')->insert(['user_id' => $user, 'provider_id' => $provider, 'state' => 'Pending Verification']);
             DB::table('provider_account_permissions')->insert(['user_id' => $user, 'permission' => $input['permission']]);
+            DB::table('entity_user_scopes')->insert(['user_id' => $user, 'business_id' => $provider]);
             DB::table('provider_user_setups')->insert(['user_id' => $user, 'mode' => 'otp']);
             $this->record('provider_user.provisioned', $user, $provider);
 

@@ -20,6 +20,7 @@ use App\Http\Controllers\CommercialAddOnController;
 use App\Http\Controllers\CommercialBillingController;
 use App\Http\Controllers\CommercialController;
 use App\Http\Controllers\CredentialSettingsController;
+use App\Http\Controllers\EntityRoleController;
 use App\Http\Controllers\GlobalBusinessSettingsController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\LegalIdentityController;
@@ -97,6 +98,16 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->where('setting', 'negative_amount');
     Route::post('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->where('setting', 'negative_amount');
     Route::get('authorization/permissions', PermissionCatalogueController::class);
+    Route::prefix('entities/{business}/roles')->whereUuid(['business', 'role', 'change'])->group(function (): void {
+        Route::get('', [EntityRoleController::class, 'index']);
+        Route::post('', [EntityRoleController::class, 'store']);
+        Route::post('copy', [EntityRoleController::class, 'copy']);
+        Route::get('approvals', [EntityRoleController::class, 'approvals']);
+        Route::post('approvals/{change}/decision', [EntityRoleController::class, 'decide']);
+        Route::put('{role}', [EntityRoleController::class, 'update']);
+        Route::post('{role}/assign', [EntityRoleController::class, 'assign']);
+        Route::post('{role}/revoke', [EntityRoleController::class, 'revoke']);
+    });
 
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
     Route::group([], function (): void {

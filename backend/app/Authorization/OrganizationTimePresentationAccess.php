@@ -53,7 +53,7 @@ final class OrganizationTimePresentationAccess
                     ->where('association.active', true);
             })->join('customer_business_scopes as scope', function ($join): void {
                 $join->on('scope.user_id', '=', 'account.user_id')->on('scope.business_id', '=', 'business.id');
-            })->join('customer_permissions as permission', function ($join) use ($permissions): void {
+            })->joinSub(CustomerPermissionGrants::forUser($user), 'permission', function ($join) use ($permissions): void {
                 $join->on('permission.user_id', '=', 'account.user_id')->on('permission.business_id', '=', 'business.id')
                     ->whereIn('permission.action', $permissions);
             })
