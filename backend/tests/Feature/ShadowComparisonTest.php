@@ -220,6 +220,37 @@ final class ShadowComparisonTest extends TestCase
         );
     }
 
+    public function test_shadow_comparison_reflects_the_same_decision_the_gate_serves(): void
+    {
+        // With the decision cache on, compare() reads the evaluator through decide() — the same
+        // cached path the cutover gate serves. So the parity evidence must match what enforcement
+        // would actually use, never a fresher-than-enforcement view. Revoke mid-flight and confirm
+        // the comparison does NOT report a match the gate could not have been serving (i.e. the
+        // stale cached allow) — it reports whatever is cached, and the cache must be bounded.
+        [$portal, $shop, $user] = $this->seedShop();
+        config(['authorization.evaluator_decisions_cached' => true, 'authorization.decision_cache_ttl' => 60]);
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+        AuthorizationVersion::bump($shop);
+
+        $comparison = new ShadowComparison(new EntityRoleAccess);
+        // While both agree, the parity result reports a match.
+        $result = $comparison->compare($user, $shop, ['mapping.initiate']);
+        $this->assertTrue($result['results']['mapping.initiate']['match']);
+
+        // Revoke the grant: the version bump invalidates the cache, so the very next comparison
+        // must reflect the deny (not a stale cached allow) for BOTH evaluator and legacy.
+        DB::table('organization_role_assignments')->where('role_id', $role)->delete();
+        AuthorizationVersion::bump($shop);
+
+        $result = $comparison->compare($user, $shop, ['mapping.initiate']);
+        $this->assertFalse($result['results']['mapping.initiate']['evaluator'], 'evaluator must see the revoke, not a stale cache');
+        $this->assertFalse($result['results']['mapping.initiate']['legacy']);
+        $this->assertTrue($result['results']['mapping.initiate']['match']);
+    }
+
     /**
      * @return array{0: string, 1: string, 2: string} portal, shop, user
      */
