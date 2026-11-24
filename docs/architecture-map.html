@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CBMS Architecture Map — Business & Service Provider</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --line:#e2e5ea; --ink:#1a1d21; --sub:#5b6472;
+    --main:#2563eb; --sub-portal:#7c3aed; --org:#0d9488; --distributor:#d97706; --shop:#db2777;
+    --mapping:#6366f1; --ok:#16a34a; --warn:#b45309;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans Devanagari",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:13px;margin-bottom:22px}
+  h2{font-size:16px;margin:34px 0 12px;display:flex;align-items:center;gap:8px}
+  h2 .n{background:var(--ink);color:#fff;border-radius:6px;padding:1px 7px;font-size:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:14px;overflow-x:auto}
+  /* node */
+  .node{display:inline-block;border-radius:10px;padding:9px 13px;border:2px solid;min-width:150px;text-align:center;vertical-align:top}
+  .node b{display:block;font-size:13px}
+  .node small{display:block;color:var(--sub);font-size:11px;margin-top:2px}
+  .layer{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;align-items:flex-start}
+  .arrow{color:var(--sub);font-size:18px;text-align:center;margin:4px 0}
+  .k-main{border-color:var(--main)} .k-main b{color:var(--main)}
+  .k-subp{border-color:var(--sub-portal)} .k-subp b{color:var(--sub-portal)}
+  .k-org{border-color:var(--org)} .k-org b{color:var(--org)}
+  .k-dist{border-color:var(--distributor)} .k-dist b{color:var(--distributor)}
+  .k-shop{border-color:var(--shop)} .k-shop b{color:var(--shop)}
+  .k-map{border-color:var(--mapping)} .k-map b{color:var(--mapping)}
+  .badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:20px;background:#eef2ff;color:#4338ca;margin-top:4px}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+  .legend span{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--sub)}
+  .sw{width:12px;height:12px;border-radius:3px;border:2px solid}
+  /* lifecycle */
+  .states{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .st{border:1.5px solid var(--line);border-radius:8px;padding:6px 11px;font-size:12px;background:#fff}
+  .st.active{border-color:var(--ok);color:var(--ok);font-weight:600}
+  .st.terminal{border-color:#9ca3af;color:#6b7280}
+  .st.draft{border-color:var(--warn);color:var(--warn)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:11px;background:#f1f5f9;border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--sub);font-weight:600;background:#fafbfc}
+  code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.two{grid-template-columns:1fr}}
+  .flow{font-size:12.5px;color:var(--sub)}
+  .flow .num{display:inline-block;background:var(--mapping);color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;font-size:11px;line-height:18px;margin-right:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CBMS Architecture Map</h1>
+  <div class="sub">Business Structure &amp; Lifecycle + Service Provider — evidence drawn from actual backend code (main @ d22fe6f)</div>
+
+  <!-- ===== 1. Business hierarchy ===== -->
+  <h2><span class="n">1</span>Business Architecture — Entity Hierarchy</h2>
+  <div class="card">
+    <p class="flow" style="margin-top:0">5 entity kinds. <code>Distributor</code> and <code>Shop</code> require a direct <b>Organization</b> parent; child ownership must equal parent ownership (immutable).</p>
+    <div class="layer">
+      <div class="node k-main"><b>Main Portal</b><small>service root · Active</small></div>
+      <div class="node k-subp"><b>Sub-Portal</b><small>service provider · Active</small></div>
+    </div>
+    <div class="arrow">│ (service link via <code>customer_tenants.provider_id</code>)</div>
+    <div class="layer">
+      <div class="node k-org"><b>Organization</b><small>standalone root · Draft</small><span class="badge">has provider</span></div>
+    </div>
+    <div class="arrow">│ (immutable parent)</div>
+    <div class="layer">
+      <div class="node k-dist"><b>Distributor</b><small>Draft</small></div>
+      <div class="node k-shop"><b>Shop</b><small>Draft</small></div>
+    </div>
+    <div class="arrow">│ (symmetric handshake)</div>
+    <div class="layer">
+      <div class="node k-map"><b>Distributor–Shop Mapping</b><small>2-party · 2-secret</small></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw k-main"></i>Main Portal</span>
+      <span><i class="sw k-subp"></i>Sub-Portal</span>
+      <span><i class="sw k-org"></i>Organization</span>
+      <span><i class="sw k-dist"></i>Distributor</span>
+      <span><i class="sw k-shop"></i>Shop</span>
+      <span><i class="sw k-map"></i>Mapping</span>
+    </div>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      <b>Source:</b> <code>BusinessStructureController::store</code> · <code>BusinessStructure::validateChild</code> · tables <code>business_identities</code>, <code>ownership_holders/links</code>
+    </p>
+  </div>
+
+  <!-- ===== 2. Lifecycle ===== -->
+  <h2><span class="n">2</span>Business Lifecycle — States &amp; Transitions</h2>
+  <div class="card">
+    <div class="states">
+      <span class="st draft">Draft</span> →
+      <span class="st">Pending Verification</span> →
+      <span class="st active">Active</span> →
+      <span class="st">Suspended</span> / <span class="st">Deactivated</span> →
+      <span class="st terminal">Closed</span>
+    </div>
+    <div class="chips">
+      <span class="chip">Draft → Active (direct) allowed</span>
+      <span class="chip">Pending Verif. → Active needs <code>verification_confirmed</code></span>
+      <span class="chip">Child → Active needs Parent Active</span>
+      <span class="chip">Suspend / Deactivate cascades to children</span>
+      <span class="chip">Restore via snapshot (<code>restores_operation_id</code>)</span>
+      <span class="chip">Closed needs all children Closed + mappings Terminated</span>
+      <span class="chip">Idempotent by caller <code>operation_id</code></span>
+    </div>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      <b>Source:</b> <code>BusinessLifecycle::TRANSITIONS</code> + <code>transition()</code> · tables <code>business_lifecycle_operations</code> (append-only audit + snapshot), <code>business_lifecycle_history</code>
+    </p>
+  </div>
+
+  <!-- ===== 3. Service Provider + Migration ===== -->
+  <h2><span class="n">3</span>Service Provider Architecture — Binding &amp; Migration</h2>
+  <div class="card">
+    <p class="flow" style="margin-top:0">An <b>Organization</b> (tenant) binds to an active <b>Main Portal</b> or <b>Sub-Portal</b> as its provider. Migration moves a tenant from a source provider to a destination.</p>
+    <div class="two">
+      <div>
+        <b style="font-size:13px">Binding</b>
+        <table>
+          <tr><th>Entity</th><th>Role</th></tr>
+          <tr><td><code>Main Portal</code></td><td>top-level provider</td></tr>
+          <tr><td><code>Sub-Portal</code></td><td>delegated provider</td></tr>
+          <tr><td><code>Organization</code></td><td>tenant (consumer)</td></tr>
+        </table>
+        <p class="flow" style="font-size:11.5px">Table <code>customer_tenants</code>: <code>organization_id ↔ provider_id</code></p>
+      </div>
+      <div>
+        <b style="font-size:13px">Migration flow</b>
+        <p class="flow">
+          <span class="num">1</span><b>preview</b>: build manifest, compute SHA-256 <code>fingerprint</code>, set <code>can_execute</code><br>
+          <span class="num">2</span><b>execute</b>: require <code>operation_id</code>+<code>fingerprint</code>+actor match (else <b>409</b>)<br>
+          <span class="num">3</span>update <code>customer_tenants.provider_id</code>, audit <code>service_provider.migrated</code>
+        </p>
+        <p class="flow" style="font-size:11.5px">
+          Guards: credential setup policy must not change (<code>before == after</code>) · structure/ownership valid · idempotent retry · append-only <code>service_provider_migrations</code>
+        </p>
+      </div>
+    </div>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      <b>Source:</b> <code>ServiceProviderMigration::preview/execute</code> · table <code>service_provider_migrations</code>
+    </p>
+  </div>
+
+  <!-- ===== 4. Mapping handshake ===== -->
+  <h2><span class="n">4</span>Distributor–Shop Mapping — Symmetric Handshake</h2>
+  <div class="card">
+    <p class="flow" style="margin-top:0">Either side may initiate. The recipient consumes the first secret, then the initiator confirms with the second. State ends <code>Active</code>, or <code>Rejected/Withdrawn/Expired/Terminated</code>.</p>
+    <table>
+      <tr><th>Stage</th><th>Action</th><th>Actor (derived)</th></tr>
+      <tr><td><code>pending_shop</code> / <code>pending_distributor</code></td><td><b>initiate</b> (create request + secret #1)</td><td>Initiator</td></tr>
+      <tr><td>↳ recipient</td><td><b>verify</b> (consume secret #1, issue secret #2)</td><td>Recipient</td></tr>
+      <tr><td><code>Active</code></td><td><b>confirm</b> (consume secret #2)</td><td>Initiator</td></tr>
+      <tr><td>—</td><td><b>reject</b> / <b>withdraw</b> / <b>end</b></td><td>Recipient / Initiator / either</td></tr>
+    </table>
+    <div class="chips">
+      <span class="chip">Secrets shown once, stored as SHA-256</span>
+      <span class="chip">7 mapping verbs per kind (symmetric)</span>
+      <span class="chip">Operation gate: <code>MappingGate</code> deny-by-default</span>
+      <span class="chip">Lifecycle ties mapping state → entity state</span>
+    </div>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      <b>Source:</b> <code>BusinessMappingController</code> · <code>MappingGate</code> · <code>PermissionCatalogue::MAPPING_BY_BUSINESS</code> · tables <code>distributor_shop_mappings</code>, <code>distributor_shop_mapping_history</code>
+    </p>
+  </div>
+
+  <!-- ===== 5. Ownership ===== -->
+  <h2><span class="n">5</span>Ownership — Legal Registry (not Authorization)</h2>
+  <div class="card">
+    <p class="flow" style="margin-top:0">
+      <b>Key principle:</b> an <b>ownership holder is not a user account</b> and grants <b>no permission</b>.
+      Ownership records the <i>legal owner</i> of a business; sign-in/authorization flows through a separate
+      permission system (<code>portal_grants</code> / <code>customer_permissions</code>).
+    </p>
+    <div class="two">
+      <div>
+        <b style="font-size:13px">Schema</b>
+        <table>
+          <tr><th>Table</th><th>Columns</th></tr>
+          <tr><td><code>ownership_holders</code></td><td><code>id</code>, <code>name</code> <span class="badge">no email/user link</span></td></tr>
+          <tr><td><code>ownership_links</code></td><td><code>owner_id</code>, <code>business_id</code></td></tr>
+        </table>
+        <p class="flow" style="font-size:11.5px">Unique <code>(owner_id, business_id)</code> — no duplicate owner per business.</p>
+        <b style="font-size:13px;display:block;margin-top:10px">Authorization is separate</b>
+        <table>
+          <tr><th>Layer</th><th>Table</th></tr>
+          <tr><td>Legal owner</td><td><code>ownership_*</code></td></tr>
+          <tr><td>Main Portal access</td><td><code>portal_grants</code></td></tr>
+          <tr><td>Tenant access</td><td><code>customer_permissions</code></td></tr>
+        </table>
+      </div>
+      <div>
+        <b style="font-size:13px">Rules</b>
+        <div class="chips">
+          <span class="chip">Created only at install (Main Portal) or business create</span>
+          <span class="chip">Distributor/Shop: <b>inherit</b> parent owner set exactly</span>
+          <span class="chip">Child owner set must equal parent owner set</span>
+          <span class="chip"><code>owner_ids max:30</code>, distinct, must exist</span>
+          <span class="chip">Immutable — no UPDATE/DELETE, no transfer endpoint</span>
+          <span class="chip">Lifecycle stores owner_ids in snapshot (restore only)</span>
+          <span class="chip">Migration re-validates ownership consistency</span>
+        </div>
+        <b style="font-size:13px;display:block;margin-top:10px">Consistency check</b>
+        <p class="flow" style="font-size:11.5px">
+          <code>GET /businesses/{org}/ownership-check</code> → compares org owner set vs each
+          Shop/Distributor; returns <code>{consistent, business_ids}</code>. Detects drift only — no correction.
+        </p>
+        <b style="font-size:13px;display:block;margin-top:6px">Known gap</b>
+        <p class="flow" style="font-size:11.5px">
+          Ownership is <b>create-only</b>. No governed flow exists to transfer, add/remove,
+          or correct an owner after creation (e.g. sale, inheritance). See gap proposal.
+        </p>
+      </div>
+    </div>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      <b>Source:</b> <code>BusinessStructureController::store/resolveOwners/checkOwnership</code> ·
+      <code>BusinessStructure::validateChild</code> · <code>InstallationController::owner</code> ·
+      <code>ServiceProviderMigration::preview</code> · tables <code>ownership_holders/links</code>
+    </p>
+  </div>
+
+  <!-- ===== 6. How both connect ===== -->
+  <h2><span class="n">6</span>How the Two Architectures Connect</h2>
+  <div class="card">
+    <pre style="margin:0;font-size:12.5px;line-height:1.7;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap">  Main Portal ─┐
+  Sub-Portal ──┤  (service providers)
+               │ provider_id
+               ▼
+        customer_tenants ──────► organization_id
+                                      │
+                                      ▼
+                        Organization  (business_identities)
+                          parent_id (immutable)
+                        ┌───────┴────────┐
+                        ▼                ▼
+                   Distributor ─────── Shop
+                        │                │
+                        └──┐          ┌──┘
+                           ▼          ▼
+                  distributor_shop_mappings
+                     (symmetric handshake → Active)
+
+   Lifecycle: state changes on any node cascade to
+   children + affected mappings, restore via snapshot.</pre>
+    <p class="flow" style="font-size:11.5px;margin:12px 0 0">
+      Single spine: <code>business_identities</code> (hierarchy) ↔ <code>customer_tenants</code> (service link) ↔ <code>distributor_shop_mappings</code> (relationship).
+    </p>
+  </div>
+</div>
+</body>
+</html>
