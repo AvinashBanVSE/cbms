@@ -119,6 +119,8 @@ final class EntityScopeAssignments
                     'dynamic' => $dynamic, 'active' => true, 'version' => 1,
                 ]);
 
+                AuthorizationVersion::bump($business);
+
                 return ['id' => $id, 'version' => 1];
             }
 
@@ -129,6 +131,8 @@ final class EntityScopeAssignments
                 'dynamic' => $dynamic, 'granted_by' => $actor,
                 'version' => (int) $current->version + 1,
             ]);
+
+            AuthorizationVersion::bump($business);
 
             return ['id' => $current->id, 'version' => (int) $current->version + 1];
         });

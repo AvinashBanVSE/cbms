@@ -409,8 +409,7 @@ final class EntityRoles
 
     private function changed(string $business, string $actor, string $role, string $event, array $details): void
     {
-        DB::table('entity_authorization_versions')->insertOrIgnore(['business_id' => $business, 'version' => 0]);
-        DB::table('entity_authorization_versions')->where('business_id', $business)->increment('version');
+        AuthorizationVersion::bump($business);
         $this->audit->audit('entity_role.'.$event, $role, $actor, ['business_id' => $business, ...$details]);
     }
 }

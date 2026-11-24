@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Authorization;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -20,8 +21,44 @@ final class AuthorizationEvaluator
 {
     /**
      * Effective actions for one business, with a reason and the catalogue version used.
+     *
+     * Cached (plan §8) behind the `evaluator_decisions_cached` flag. The cache key is
+     * versionKey(): any role/scope/deny/deny-exception/direct-grant change bumps the entity
+     * version and any catalogue change bumps the catalogue version, so a cached decision is
+     * invalidated before its next read and can never outlive a revoke. Reads the authoritative
+     * state through the same query path on a cache miss; default-off so nothing changes until
+     * the team opts in after shadow comparison.
      */
     public function decide(string $user, string $businessId): AuthorizationDecision
+    {
+        if (config('authorization.evaluator_decisions_cached', false) !== true) {
+            return $this->compute($user, $businessId);
+        }
+
+        $key = 'auth.decision.'.sha1($user.'|'.$this->versionKey($businessId));
+
+        /** @var array<string, mixed>|null $cached */
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return new AuthorizationDecision(
+                businessId: (string) $cached['business_id'],
+                kind: (string) $cached['kind'],
+                allowed: (array) $cached['allowed'],
+                denied: (array) $cached['denied'],
+                denyReasons: (array) $cached['deny_reasons'],
+                precedence: (array) $cached['precedence'],
+                source: (string) $cached['source'],
+                catalogueVersion: (int) $cached['catalogue_version'],
+            );
+        }
+
+        $decision = $this->compute($user, $businessId);
+        Cache::put($key, $decision->toArray(), (int) config('authorization.decision_cache_ttl', 300));
+
+        return $decision;
+    }
+
+    private function compute(string $user, string $businessId): AuthorizationDecision
     {
         $business = DB::table('business_identities')
             ->where('id', $businessId)

@@ -107,6 +107,8 @@ final class DenyExceptions
                 ]),
             ]);
 
+            AuthorizationVersion::bump($business);
+
             return ['id' => $id, 'version' => $version];
         }, attempts: 3);
     }
@@ -119,6 +121,7 @@ final class DenyExceptions
             abort_if($exception === null, 404);
 
             DB::table('entity_deny_exceptions')->where('id', $id)->update(['active' => false, 'updated_at' => now()]);
+            AuthorizationVersion::bump($business);
             DB::table('portal_events')->insert([
                 'id' => Str::uuid7()->toString(), 'action' => 'authorization.deny_exception_removed',
                 'actor_id' => $actor, 'subject_id' => $exception->user_id, 'recorded_at' => now(),

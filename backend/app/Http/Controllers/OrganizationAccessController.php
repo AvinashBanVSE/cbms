@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Authorization\AuthorizationVersion;
 use App\Authorization\MappingPermissions;
 use App\Authorization\OrganizationAccessDelegation;
 use App\Authorization\OrganizationBusinessRoles;
@@ -72,6 +73,7 @@ final class OrganizationAccessController
             foreach ($actions as $action) {
                 DB::table('customer_permissions')->insert([...$binding, 'action' => $action]);
             }
+            AuthorizationVersion::bump($business);
             DB::table('portal_events')->insert([
                 'id' => Str::uuid7()->toString(), 'action' => 'organization_user.access_changed',
                 'actor_id' => Auth::id(), 'subject_id' => $binding['user_id'], 'recorded_at' => now(),
