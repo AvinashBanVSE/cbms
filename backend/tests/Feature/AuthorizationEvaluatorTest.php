@@ -60,5 +60,42 @@ final class AuthorizationEvaluatorTest extends TestCase
         $unknown = $evaluator->decide($id, (string) Str::uuid7());
         $this->assertSame([], $unknown->allowed);
         $this->assertSame('unknown_business', $unknown->source);
+
+        // An expired deny no longer suppresses the granted action.
+        DB::table('entity_permission_denies')
+            ->where('business_id', $shop)->where('user_id', $id)
+            ->update(['expires_at' => now()->subMinute()]);
+        $this->assertSame(['mapping.initiate'], $evaluator->decide($id, $shop)->allowed);
+
+        // A deny on a non-granted action is still surfaced as denied (§6 prohibitions win).
+        DB::table('entity_permission_denies')->where('business_id', $shop)->delete();
+        DB::table('customer_permissions')->where('user_id', $id)->delete();
+        DB::table('entity_permission_denies')->insert([
+            'id' => (string) Str::uuid7(), 'business_id' => $shop, 'user_id' => $id,
+            'action' => 'mapping.confirm', 'reason' => 'not yours', 'created_by' => $id,
+        ]);
+        $surfaced = $evaluator->decide($id, $shop);
+        $this->assertSame([], $surfaced->allowed);
+        $this->assertSame(['mapping.confirm'], $surfaced->denied);
+        $this->assertSame('not yours', $surfaced->denyReasons['mapping.confirm']);
+    }
+
+    public function test_version_key_tracks_catalogue_and_entity_versions(): void
+    {
+        $portal = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $portal, 'kind' => 'Main Portal', 'professional_name' => 'MP']);
+        DB::table('portal_installation')->where('id', 1)->update(['portal_id' => $portal, 'stage' => 'ready']);
+        $shop = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $shop, 'kind' => 'Shop', 'professional_name' => 'Shop']);
+
+        $evaluator = new AuthorizationEvaluator;
+
+        $key = $evaluator->versionKey($shop);
+        $this->assertSame('catalogue=1;entity=0', $key);
+
+        // A transactional authorization-version bump changes the key (§8 cache invalidation input).
+        DB::table('entity_authorization_versions')->insertOrIgnore(['business_id' => $shop, 'version' => 0]);
+        DB::table('entity_authorization_versions')->where('business_id', $shop)->increment('version');
+        $this->assertSame('catalogue=1;entity=1', $evaluator->versionKey($shop));
     }
 }

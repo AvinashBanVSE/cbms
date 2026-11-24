@@ -81,6 +81,30 @@ final class PermissionCatalogueTest extends TestCase
         }
     }
 
+    public function test_governed_catalogue_edit_updates_presentation_but_not_operation_identity(): void
+    {
+        $user = $this->portalUser();
+        $version = (int) DB::table('permission_definitions')->where('code', 'mapping.initiate')->value('version');
+
+        $this->actingAs($user)->putJson('/api/v1/authorization/permissions/mapping.initiate', [
+            'name' => 'Initiate a mapping request',
+            'active' => true,
+            'assignable' => false,
+            'expected_version' => $version,
+        ])->assertOk()->assertJsonPath('data.version', $version + 1)
+            ->assertJsonPath('data.assignable', 0);
+
+        // Operation identity is immutable through this endpoint.
+        $definition = DB::table('permission_definitions')->where('code', 'mapping.initiate')->first();
+        $this->assertSame('mapping.initiate', $definition->code);
+        $this->assertSame('Initiate a mapping request', $definition->name);
+
+        // Stale expected_version is rejected (lost-update guard).
+        $this->actingAs($user)->putJson('/api/v1/authorization/permissions/mapping.initiate', [
+            'name' => 'Again', 'active' => true, 'assignable' => true, 'expected_version' => $version,
+        ])->assertConflict();
+    }
+
     private function portalUser(): User
     {
         $portal = (string) Str::uuid7();

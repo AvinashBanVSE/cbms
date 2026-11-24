@@ -100,6 +100,7 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->where('setting', 'negative_amount');
     Route::post('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->where('setting', 'negative_amount');
     Route::get('authorization/permissions', PermissionCatalogueController::class);
+    Route::put('authorization/permissions/{code}', [PermissionCatalogueController::class, 'update'])->where('code', '[a-z_]+\.[a-z_]+');
     Route::prefix('entities/{business}/roles')->whereUuid(['business', 'role', 'change', 'deny'])->group(function (): void {
         Route::get('', [EntityRoleController::class, 'index']);
         Route::post('', [EntityRoleController::class, 'store']);

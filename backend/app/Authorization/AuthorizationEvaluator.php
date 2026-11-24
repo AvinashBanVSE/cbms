@@ -83,4 +83,18 @@ final class AuthorizationEvaluator
             catalogueVersion: $version,
         );
     }
+
+    /**
+     * Version material for a cache key (plan §8): the catalogue version plus this business's
+     * authorization version (bumped transactionally on role/scope/policy change), so a cached
+     * decision can be keyed to invalidate when any input version changes. No caching is done
+     * here — consumers must recheck authoritative state on sensitive mutations.
+     */
+    public function versionKey(string $businessId): string
+    {
+        $catalogue = (int) (DB::table('permission_definitions')->where('active', true)->max('version') ?? 0);
+        $entity = (int) (DB::table('entity_authorization_versions')->where('business_id', $businessId)->value('version') ?? 0);
+
+        return "catalogue={$catalogue};entity={$entity}";
+    }
 }
