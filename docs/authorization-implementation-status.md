@@ -17,6 +17,7 @@ The user approved all policy decisions and authorized implementation. Delivery i
 - Privileged assignment requires independent review. Existing configurable assignment stages, sequential/parallel counts, reviewer/beneficiary exclusions, expiry, current authority rechecks, audit events and snapshot invalidation are implemented. Management approval cannot be disabled by changing its catalogue flag.
 - Role grants integrated with existing portal, provider, mapping, organization onboarding/presentation and client-administration checks. Eligibility is applied in SQL without per-entity permission-fetch loops or a stale authorization cache.
 - Governed roles cannot be assigned through the legacy endpoint. Legacy rows and existing assignments remain intact; no bulk conversion or privilege expansion is performed.
+- Business-scoped direct user denies are persisted and enforced against governed role grants, with optional expiry, audited creation/removal and manager-only administration.
 
 See entity-role-api.md for payloads, boundaries and migration details.
 
@@ -28,7 +29,7 @@ Security coverage includes all five entity kinds, same-name independence, grant 
 
 ## Remaining approved work
 
-Direct Deny and approved deny expiry; selected/snapshot/excluded/future entity scope selectors; owner-linked/purpose-limited cross-entity policy evaluation; full policy precedence and configuration editors; atomic edits of assigned roles through an approval workflow; governed permission-catalogue writes; frontend administration; queued-work/caching integration; full shadow comparison and controlled cutover. Existing portal-wide administrative operations and provider-directory meanings have not been narrowed into per-record scope by this increment.
+Approved deny exceptions beyond the current business-scoped user deny model; selected/snapshot/excluded/future entity scope selectors; owner-linked/purpose-limited cross-entity policy evaluation; full policy precedence and configuration editors; atomic edits of assigned roles through an approval workflow; governed permission-catalogue writes; frontend administration; queued-work/caching integration; full shadow comparison and controlled cutover. Existing portal-wide administrative operations and provider-directory meanings have not been narrowed into per-record scope by this increment.
 
 ## Migration and rollback boundary
 

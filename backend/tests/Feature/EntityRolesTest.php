@@ -322,6 +322,25 @@ final class EntityRolesTest extends TestCase
         $this->getJson('/api/v1/tenants/'.$tenant.'/clients')->assertForbidden();
     }
 
+    public function test_business_scoped_direct_deny_overrides_roles_and_can_expire_or_be_removed(): void
+    {
+        [$business, $user] = $this->context('Shop');
+        $role = $this->createRole($business, ['mapping.initiate']);
+        $this->assign($business, $role, $user)->assertOk();
+        $this->assertTrue(app(EntityRoleAccess::class)->allows($user->id, $business, 'mapping.initiate'));
+
+        $this->actingAs($this->owner)->postJson($this->url($business).'/denies', [
+            'user_id' => $user->id, 'action' => 'mapping.initiate', 'reason' => 'Temporary review',
+            'expires_at' => now()->addMinutes(5)->toIso8601String(),
+        ])->assertCreated();
+        $this->assertFalse(app(EntityRoleAccess::class)->allows($user->id, $business, 'mapping.initiate'));
+        $this->getJson($this->url($business).'/denies')->assertOk()->assertJsonCount(1, 'data');
+
+        $deny = DB::table('entity_permission_denies')->where(['business_id' => $business, 'user_id' => $user->id])->first();
+        $this->deleteJson($this->url($business).'/denies/'.$deny->id)->assertOk();
+        $this->assertTrue(app(EntityRoleAccess::class)->allows($user->id, $business, 'mapping.initiate'));
+    }
+
     private function createRole(string $business, array $actions, array $limits = []): string
     {
         return $this->postJson($this->url($business), ['name' => 'Manager', 'actions' => $actions, 'grant_actions' => $limits])->assertCreated()->json('id');

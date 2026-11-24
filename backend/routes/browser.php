@@ -98,7 +98,7 @@ Route::prefix('api/v1')->group(function (): void {
     Route::get('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'showOrganization'])->where('setting', 'negative_amount');
     Route::post('organization-number-presentation/{setting}', [BusinessTimePresentationController::class, 'updateOrganization'])->where('setting', 'negative_amount');
     Route::get('authorization/permissions', PermissionCatalogueController::class);
-    Route::prefix('entities/{business}/roles')->whereUuid(['business', 'role', 'change'])->group(function (): void {
+    Route::prefix('entities/{business}/roles')->whereUuid(['business', 'role', 'change', 'deny'])->group(function (): void {
         Route::get('', [EntityRoleController::class, 'index']);
         Route::post('', [EntityRoleController::class, 'store']);
         Route::post('copy', [EntityRoleController::class, 'copy']);
@@ -107,6 +107,9 @@ Route::prefix('api/v1')->group(function (): void {
         Route::put('{role}', [EntityRoleController::class, 'update']);
         Route::post('{role}/assign', [EntityRoleController::class, 'assign']);
         Route::post('{role}/revoke', [EntityRoleController::class, 'revoke']);
+        Route::get('denies', [EntityRoleController::class, 'denies']);
+        Route::post('denies', [EntityRoleController::class, 'deny']);
+        Route::delete('denies/{deny}', [EntityRoleController::class, 'removeDeny']);
     });
 
     Route::get('audit-trail', AuditTrailController::class)->middleware('throttle:60,1,audit-trail');
