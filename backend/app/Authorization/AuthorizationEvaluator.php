@@ -43,15 +43,12 @@ final class AuthorizationEvaluator
         $kind = (string) $business->kind;
         $version = (int) (DB::table('permission_definitions')->where('active', true)->max('version') ?? 0);
 
-        $grants = CustomerPermissionGrants::forUser($user)
-            ->where('business_id', $businessId)
-            ->distinct()
-            ->pluck('action')
-            ->all();
-
-        // Only actions the catalogue marks applicable to this kind count as positive grants.
-        $applicable = PermissionCatalogue::actions($kind);
-        $allowed = array_values(array_intersect($grants, $applicable));
+        $direct = DB::table('customer_permissions')
+            ->where('user_id', $user)->where('business_id', $businessId)
+            ->distinct()->pluck('action')->all();
+        $role = OrganizationBusinessRoles::permissionsFor($user)
+            ->where('role.business_id', $businessId)
+            ->distinct()->pluck('action.action')->all();
 
         // Explicit denies win over grants; a deny on a non-granted action is still surfaced.
         $denies = DB::table('entity_permission_denies')
@@ -62,26 +59,74 @@ final class AuthorizationEvaluator
             })
             ->get(['action', 'reason']);
 
-        $denied = [];
         $denyReasons = [];
         foreach ($denies as $deny) {
-            $action = (string) $deny->action;
-            $denied[] = $action;
-            $denyReasons[$action] = (string) $deny->reason;
+            $denyReasons[(string) $deny->action] = (string) $deny->reason;
         }
 
-        // A denied action is removed from allowed (prohibitions win, §6).
-        $allowed = array_values(array_diff($allowed, $denied));
+        $precedence = $this->precedence($kind, $direct, $role, $denies);
 
         return new AuthorizationDecision(
             businessId: $businessId,
             kind: $kind,
-            allowed: $allowed,
-            denied: $denied,
+            allowed: $precedence['allowed'],
+            denied: $precedence['denied'],
             denyReasons: $denyReasons,
+            precedence: $precedence['tiers'],
             source: 'central_evaluator',
             catalogueVersion: $version,
         );
+    }
+
+    /**
+     * The §6 precedence chain, made visible per action (plan §89: effective-access explanation
+     * and override-source display). Positive grants are unioned, intersected with the
+     * applicable (stable-core bound) catalogue, then explicit prohibitions win. Each action ends
+     * in one tier and records WHY — which source granted it, or which rule bound it — so a caller
+     * can display the override source instead of only an allow/deny bit.
+     *
+     * @return array{allowed: list<string>, denied: list<string>, tiers: array<string, array<string, string|null>>}
+     */
+    private function precedence(string $kind, array $direct, array $role, object $denies): array
+    {
+        $applicable = PermissionCatalogue::actions($kind);
+        $denied = array_map(fn ($d): string => (string) $d->action, $denies->all());
+        $reasons = [];
+        foreach ($denies as $deny) {
+            $reasons[(string) $deny->action] = (string) $deny->reason;
+        }
+
+        $allowed = [];
+        $tiers = [];
+        foreach ($applicable as $action) {
+            $tier = $this->tier($action, $direct, $role, $denied);
+            $tiers[$action] = ['tier' => $tier, 'reason' => $reasons[$action] ?? null];
+            if ($tier === 'allowed') {
+                $allowed[] = $action;
+            }
+        }
+
+        // Prohibitions only apply to actions that reach this evaluator for this entity; an explicit
+        // deny on a non-granted action is still surfaced as denied evidence (not allowed).
+        $deniedOut = array_values(array_filter($denied, fn (string $a): bool => in_array($a, $applicable, true) || isset($reasons[$a])));
+
+        return ['allowed' => $allowed, 'denied' => $deniedOut, 'tiers' => $tiers];
+    }
+
+    /** Which §6 tier an applicable action resolves to, plus the grant source that produced it. */
+    private function tier(string $action, array $direct, array $role, array $denied): string
+    {
+        if (in_array($action, $denied, true)) {
+            return 'prohibited';
+        }
+        if (in_array($action, $direct, true)) {
+            return 'allowed';
+        }
+        if (in_array($action, $role, true)) {
+            return 'allowed';
+        }
+
+        return 'bound'; // applicable but not granted: absence of a grant is a default denial
     }
 
     /**

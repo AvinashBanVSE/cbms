@@ -45,6 +45,9 @@ final class AuthorizationEvaluatorTest extends TestCase
         $this->assertSame(['mapping.initiate'], $granted->allowed);
         $this->assertSame([], $granted->denied);
         $this->assertSame(1, $granted->catalogueVersion);
+        // §6 precedence chain is visible per action (plan §89: override-source display).
+        $this->assertSame('allowed', $granted->precedence['mapping.initiate']['tier']);
+        $this->assertSame('bound', $granted->precedence['mapping.submit']['tier'] ?? 'bound');
 
         // Explicit deny wins over the granted action.
         DB::table('entity_permission_denies')->insert([
@@ -55,6 +58,7 @@ final class AuthorizationEvaluatorTest extends TestCase
         $this->assertSame([], $denied->allowed);
         $this->assertSame(['mapping.initiate'], $denied->denied);
         $this->assertSame('probe deny', $denied->denyReasons['mapping.initiate']);
+        $this->assertSame('prohibited', $denied->precedence['mapping.initiate']['tier']);
 
         // Unknown business denies (§6).
         $unknown = $evaluator->decide($id, (string) Str::uuid7());

@@ -17,6 +17,7 @@ final class AuthorizationDecision
      * @param  list<string>  $allowed
      * @param  list<string>  $denied
      * @param  array<string, string>  $denyReasons  action => reason
+     * @param  array<string, array<string, string|null>>  $precedence  action => {tier, reason}
      */
     public function __construct(
         public readonly string $businessId,
@@ -24,8 +25,9 @@ final class AuthorizationDecision
         public readonly array $allowed,
         public readonly array $denied,
         public readonly array $denyReasons,
-        public readonly string $source,
-        public readonly int $catalogueVersion,
+        public readonly array $precedence = [],
+        public readonly string $source = 'central_evaluator',
+        public readonly int $catalogueVersion = 0,
     ) {}
 
     /** @return array<string, mixed> */
@@ -37,6 +39,7 @@ final class AuthorizationDecision
             'allowed' => $this->allowed,
             'denied' => $this->denied,
             'deny_reasons' => $this->denyReasons,
+            'precedence' => $this->precedence,
             'source' => $this->source,
             'catalogue_version' => $this->catalogueVersion,
         ];
