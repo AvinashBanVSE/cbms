@@ -11,6 +11,7 @@ use App\Authorization\ProviderAccess;
 use App\Http\Controllers\AccountRecoveryController;
 use App\Http\Controllers\AuditTrailController;
 use App\Http\Controllers\AuthenticatorController;
+use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\BusinessLifecycleController;
 use App\Http\Controllers\BusinessMappingController;
 use App\Http\Controllers\BusinessStructureController;
@@ -49,6 +50,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('api/v1')->group(function (): void {
     Route::get('csrf', fn () => response()->json(['token' => csrf_token()])->header('Cache-Control', 'no-store'));
     Route::get('workspace-access', WorkspaceAccessController::class);
+    Route::get('authorization-context', AuthorizationContextController::class);
     Route::get('authenticator', [AuthenticatorController::class, 'show']);
     Route::post('authenticator/prepare', [AuthenticatorController::class, 'prepare'])->middleware('throttle:5,1,authenticator-prepare');
     Route::post('authenticator/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:5,1,authenticator-confirm');
