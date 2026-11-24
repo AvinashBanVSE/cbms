@@ -54,6 +54,15 @@ final class EntityRoleAccess
             })
             ->where('assignment.user_id', $user)->where('role.governed', true)->where('role.archived', false)
             ->where('definition.active', true)->where('business.operational_state', 'Active')
+            ->whereNotExists(function (Builder $deny) use ($user): void {
+                $deny->selectRaw('1')->from('entity_permission_denies as restriction')
+                    ->where('restriction.user_id', $user)
+                    ->whereColumn('restriction.business_id', 'role.business_id')
+                    ->whereColumn('restriction.action', 'permission.action')
+                    ->where(function (Builder $expiry): void {
+                        $expiry->whereNull('restriction.expires_at')->orWhere('restriction.expires_at', '>', now());
+                    });
+            })
             ->where(function (Builder $context) use ($user): void {
                 $context->where(function (Builder $customer) use ($user): void {
                     $customer->whereIn('business.kind', ['Organization', 'Distributor', 'Shop'])
@@ -93,7 +102,9 @@ final class EntityRoleAccess
 
     public function allows(string $user, string $business, string $action): bool
     {
-        return self::permissionsFor($user)->where('role.business_id', $business)->where('permission.action', $action)->exists();
+        return ! DB::table('entity_permission_denies')->where(['user_id' => $user, 'business_id' => $business, 'action' => $action])
+            ->where(fn (Builder $query): Builder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))->exists()
+            && self::permissionsFor($user)->where('role.business_id', $business)->where('permission.action', $action)->exists();
     }
 
     public function manages(string $user, string $business): bool

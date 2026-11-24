@@ -100,6 +100,30 @@ final class EntityRoleController
         return response()->json(['assigned' => false]);
     }
 
+    public function denies(string $business): JsonResponse
+    {
+        $this->roles->requireManager($this->actor(), $business);
+
+        return response()->json(['data' => DB::table('entity_permission_denies')->where('business_id', $business)->orderBy('id')->get()])->header('Cache-Control', 'no-store');
+    }
+
+    public function deny(Request $request, string $business): JsonResponse
+    {
+        $data = $request->validate([
+            'user_id' => 'required|uuid', 'action' => 'required|string', 'reason' => 'required|string|max:1000',
+            'expires_at' => 'nullable|date|after:now',
+        ]);
+
+        return response()->json($this->roles->deny($this->actor(), $business, $data['user_id'], $data['action'], $data['reason'], $data['expires_at'] ?? null), 201);
+    }
+
+    public function removeDeny(string $business, string $deny): JsonResponse
+    {
+        $this->roles->removeDeny($this->actor(), $business, $deny);
+
+        return response()->json(['denied' => false]);
+    }
+
     public function approvals(string $business): JsonResponse
     {
         $actor = $this->actor();

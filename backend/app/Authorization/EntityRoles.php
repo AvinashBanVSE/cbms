@@ -224,6 +224,36 @@ final class EntityRoles
         }, attempts: 3);
     }
 
+    public function deny(string $actor, string $business, string $user, string $action, string $reason, ?string $expiresAt): array
+    {
+        return DB::transaction(function () use ($actor, $business, $user, $action, $reason, $expiresAt): array {
+            $this->lock($business);
+            $entity = $this->requireManager($actor, $business);
+            abort_if(! in_array($action, PermissionCatalogue::actions($entity->kind, null, true), true), 422, 'Select an active permission applicable to this entity.');
+            abort_if($actor === $user, 422, 'An administrator cannot create a restriction for their own account.');
+            $id = (string) Str::uuid7();
+            DB::table('entity_permission_denies')->updateOrInsert(
+                ['business_id' => $business, 'user_id' => $user, 'action' => $action],
+                ['id' => $id, 'reason' => $reason, 'created_by' => $actor, 'expires_at' => $expiresAt, 'updated_at' => now(), 'created_at' => now()]
+            );
+            $this->changed($business, $actor, $id, 'denied', ['user_id' => $user, 'action' => $action, 'expires_at' => $expiresAt]);
+
+            return ['id' => $id, 'denied' => true];
+        }, attempts: 3);
+    }
+
+    public function removeDeny(string $actor, string $business, string $id): void
+    {
+        DB::transaction(function () use ($actor, $business, $id): void {
+            $this->lock($business);
+            $this->requireManager($actor, $business);
+            $deny = DB::table('entity_permission_denies')->where(['id' => $id, 'business_id' => $business])->first();
+            abort_if($deny === null, 404);
+            DB::table('entity_permission_denies')->where('id', $id)->delete();
+            $this->changed($business, $actor, $id, 'deny_removed', ['user_id' => $deny->user_id, 'action' => $deny->action]);
+        }, attempts: 3);
+    }
+
     private function validateContents(string $actor, string $business, string $kind, array $data): void
     {
         $all = array_unique([...$data['actions'], ...$data['grant_actions']]);
