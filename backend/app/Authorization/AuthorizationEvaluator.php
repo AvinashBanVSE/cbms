@@ -87,13 +87,21 @@ final class AuthorizationEvaluator
             ->where('role.business_id', $businessId)
             ->distinct()->pluck('action.action')->all();
 
-        // Explicit denies win over grants; a deny on a non-granted action is still surfaced.
+        // Explicit denies win over grants, BUT a governed deny exception (D1 carve-out) waives
+        // the deny inside its narrower context — the legacy allows() path honours it, so the
+        // evaluator must too or parity data and any later cutover would wrongly revoke the
+        // waived authority. An active exception on the deny suppresses that deny here.
         $denies = DB::table('entity_permission_denies')
             ->where('business_id', $businessId)
             ->where('user_id', $user)
             ->where(function ($query): void {
                 $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
             })
+            ->whereNotExists(fn ($exception) => $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
+                ->whereColumn('carve_out.deny_id', 'entity_permission_denies.id')
+                ->where('carve_out.active', true)
+                ->where(fn ($expiry) => $expiry->whereNull('carve_out.expires_at')
+                    ->orWhere('carve_out.expires_at', '>', now())))
             ->get(['action', 'reason']);
 
         $denyReasons = [];

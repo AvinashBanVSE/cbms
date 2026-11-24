@@ -7,6 +7,8 @@ namespace Tests\Feature;
 use App\Authorization\AuthorizationCutover;
 use App\Authorization\AuthorizationEvaluator;
 use App\Authorization\AuthorizationVersion;
+use App\Authorization\DenyExceptions;
+use App\Authorization\EntityRoleAccess;
 use App\Authorization\ShadowComparison;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -76,6 +78,38 @@ final class ShadowComparisonTest extends TestCase
         $this->assertNotNull(Cache::get($key));
         Cache::forget($key);
         $this->assertNull(Cache::get($key));
+    }
+
+    public function test_evaluator_must_honor_governed_deny_exceptions_like_legacy(): void
+    {
+        [$portal, $shop, $user] = $this->seedShop();
+        $manager = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr@example.test', 'password' => 'x']);
+        // A Main Portal administrative grant is the established exception-authority path.
+        DB::table('portal_grants')->insert(['user_id' => $manager, 'business_id' => $portal, 'permission' => 'organization_users.manage']);
+        // A role grant (the legacy positive path), a governed deny, then a governed exception.
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+        DB::table('customer_permissions')->insert(['user_id' => $user, 'business_id' => $shop, 'action' => 'mapping.initiate']);
+        DB::table('entity_permission_denies')->insert([
+            'id' => (string) Str::uuid7(), 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'reason' => 'compliance hold', 'created_by' => $manager,
+        ]);
+        (new DenyExceptions)->save($manager, $shop, $user, [
+            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'approved carve-out',
+        ]);
+        AuthorizationVersion::bump($shop);
+
+        $this->assertTrue(
+            (new EntityRoleAccess)->allows($user, $shop, 'mapping.initiate'),
+            'legacy must allow inside a governed exception'
+        );
+        $this->assertTrue(
+            in_array('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed, true),
+            'evaluator must honor governed deny exceptions or parity data is wrong'
+        );
     }
 
     public function test_cutover_gate_is_off_by_default_and_bounded_to_listed_businesses(): void
