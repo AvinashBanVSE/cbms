@@ -1,0 +1,154 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use App\Authorization\DenyExceptions;
+use App\Authorization\EntityRoleAccess;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Tests\TestCase;
+
+/** Exercised D1 deny exceptions: narrower-context waiver of a matching deny. */
+final class DenyExceptionsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private DenyExceptions $exceptions;
+
+    private string $organization;
+
+    private string $tenant;
+
+    private string $portal;
+
+    private object $manager;
+
+    private object $user;
+
+    private string $shop;
+
+    private string $role;
+
+    private int $sequence = 0;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->exceptions = new DenyExceptions;
+
+        $this->portal = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $this->portal, 'kind' => 'Main Portal', 'professional_name' => 'MP']);
+        DB::table('portal_installation')->where('id', 1)->update(['stage' => 'ready', 'portal_id' => $this->portal]);
+
+        $this->organization = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $this->organization, 'kind' => 'Organization', 'professional_name' => 'Org']);
+        $this->tenant = (string) Str::uuid7();
+        DB::table('customer_tenants')->insert(['id' => $this->tenant, 'organization_id' => $this->organization, 'provider_id' => $this->portal]);
+
+        $this->shop = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $this->shop, 'kind' => 'Shop', 'professional_name' => 'Shop', 'parent_id' => $this->organization]);
+
+        $this->manager = $this->user();
+        $this->user = $this->user();
+        DB::table('portal_grants')->insert(['user_id' => $this->manager->id, 'business_id' => $this->portal, 'permission' => 'organization_users.manage']);
+        DB::table('entity_user_scopes')->insert(['user_id' => $this->manager->id, 'business_id' => $this->portal]);
+
+        // A governed role for the user with mapping.initiate.
+        $this->role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $this->role, 'business_id' => $this->shop, 'name' => 'Worker', 'governed' => true, 'version' => 1]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $this->role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $this->role, 'user_id' => $this->user->id]);
+        // Positive access path: association + scope + account so permissionsFor can grant.
+        DB::table('customer_accounts')->insert(['user_id' => $this->user->id, 'tenant_id' => $this->tenant, 'state' => 'Active']);
+        DB::table('customer_business_associations')->insert(['user_id' => $this->user->id, 'business_id' => $this->shop, 'active' => true]);
+        DB::table('customer_business_scopes')->insert(['user_id' => $this->user->id, 'business_id' => $this->shop]);
+        // Positive direct grant for the action (the deny will block it until the exception waives it).
+        DB::table('customer_permissions')->insert(['user_id' => $this->user->id, 'business_id' => $this->shop, 'action' => 'mapping.initiate']);
+    }
+
+    private function user(): object
+    {
+        $this->sequence++;
+        $id = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $id, 'code' => sprintf('DE%04d', $this->sequence), 'email' => 'de'.$this->sequence.'@test.invalid', 'password' => 'unused']);
+
+        return DB::table('users')->where('id', $id)->first();
+    }
+
+    private function deny(): string
+    {
+        $id = (string) Str::uuid7();
+        DB::table('entity_permission_denies')->insert([
+            'id' => $id, 'business_id' => $this->shop, 'user_id' => $this->user->id,
+            'action' => 'mapping.initiate', 'reason' => 'blocked', 'created_by' => $this->manager->id,
+        ]);
+
+        return $id;
+    }
+
+    public function test_exception_waives_matching_deny_within_its_scope(): void
+    {
+        $deny = $this->deny();
+        // Before exception: the deny blocks an otherwise-positively-granted action.
+        $access = new EntityRoleAccess;
+        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate'));
+        $this->assertFalse(DenyExceptions::waives($this->user->id, $this->shop, 'mapping.initiate'));
+
+        $result = $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 'mapping_records',
+            'reason' => 'temporary waiver', 'expected_version' => 0,
+        ]);
+        $this->assertSame(1, $result['version']);
+
+        // Selector-scope exception (no specific target) waives the deny.
+        $this->assertTrue(DenyExceptions::waives($this->user->id, $this->shop, 'mapping.initiate'));
+        $this->assertTrue((new EntityRoleAccess)->allows($this->user->id, $this->shop, 'mapping.initiate'));
+    }
+
+    public function test_record_scope_exception_requires_target_and_is_refused_without_it(): void
+    {
+        $this->deny();
+        $this->expectException(HttpException::class);
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD,
+            'reason' => 'x', 'expected_version' => 0,
+        ]);
+    }
+
+    public function test_exception_cannot_be_self_granted_or_created_without_a_deny(): void
+    {
+        $this->deny();
+        $this->expectException(HttpException::class);
+        $this->exceptions->save($this->user->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'reason' => 'self', 'expected_version' => 0,
+        ]);
+    }
+
+    public function test_exception_needs_an_existing_deny(): void
+    {
+        $this->expectException(HttpException::class);
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'reason' => 'no deny', 'expected_version' => 0,
+        ]);
+    }
+
+    public function test_stale_version_is_rejected(): void
+    {
+        $this->deny();
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'reason' => 'first', 'expected_version' => 0,
+        ]);
+        $this->expectException(HttpException::class);
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'reason' => 'second', 'expected_version' => 0,
+        ]);
+    }
+}

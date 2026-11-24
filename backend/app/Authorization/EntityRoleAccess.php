@@ -61,6 +61,15 @@ final class EntityRoleAccess
                     ->whereColumn('restriction.action', 'permission.action')
                     ->where(function (Builder $expiry): void {
                         $expiry->whereNull('restriction.expires_at')->orWhere('restriction.expires_at', '>', now());
+                    })
+                    // A governed exception waives the matching deny at its narrower context.
+                    ->whereNotExists(function (Builder $exception): void {
+                        $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
+                            ->whereColumn('carve_out.deny_id', 'restriction.id')
+                            ->where('carve_out.active', true)
+                            ->where(function (Builder $expiry): void {
+                                $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now());
+                            });
                     });
             })
             ->where(function (Builder $context) use ($user): void {
@@ -102,8 +111,15 @@ final class EntityRoleAccess
 
     public function allows(string $user, string $business, string $action): bool
     {
-        return ! DB::table('entity_permission_denies')->where(['user_id' => $user, 'business_id' => $business, 'action' => $action])
-            ->where(fn (Builder $query): Builder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))->exists()
+        $deny = DB::table('entity_permission_denies')->where(['user_id' => $user, 'business_id' => $business, 'action' => $action])
+            ->where(fn (Builder $query): Builder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->whereNotExists(fn (Builder $exception) => $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
+                ->whereColumn('carve_out.deny_id', 'entity_permission_denies.id')
+                ->where('carve_out.active', true)
+                ->where(fn (Builder $expiry): object => $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now())))
+            ->exists();
+
+        return ! $deny
             && self::permissionsFor($user)->where('role.business_id', $business)->where('permission.action', $action)->exists();
     }
 
