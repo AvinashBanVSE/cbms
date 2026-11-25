@@ -24,6 +24,16 @@ final class DenyExceptions
     public const SELECTOR = 'selector';
 
     /**
+     * The selector scope is NOT currently creatable. It has no approved resource-ownership model
+     * that would let a selector name resolve to a governed set of records, and enforcing it as a
+     * whole-action waiver (its previous behavior) was an unapproved access expansion (finding 5.5).
+     * Rather than accept a selector that cannot be resolved, creation fails closed: only the
+     * resource-aware "record" scope is granted. Supporting selector scope properly requires an
+     * approved selector-resolution model and is tracked as outstanding work, not improvised here.
+     */
+    public const SUPPORTED_SCOPES = [self::RECORD];
+
+    /**
      * Governed create/update of an exception. Requires restriction-management authority for the
      * business and blocks self-granted exceptions (mirrors the deny jurisdiction rules). Version
      * guard prevents concurrent lost updates.
@@ -41,19 +51,16 @@ final class DenyExceptions
             abort_if($deny === null, 422, 'An exception can only be scoped to an existing restriction.');
 
             $scope = $data['scope'];
-            abort_unless(in_array($scope, [self::RECORD, self::SELECTOR], true), 422, 'Choose a supported exception scope.');
+            abort_unless(in_array($scope, self::SUPPORTED_SCOPES, true), 422,
+                'Only record-scoped exceptions are supported; selector scope requires a resolution model that is not yet approved.');
             abort_if($scope === self::RECORD && empty($data['target_id']), 422, 'A record exception needs a target record.');
-            abort_if($scope === self::SELECTOR && empty($data['selector']), 422, 'A selector exception needs a governed selector.');
 
             $targetId = $data['target_id'] ?? null;
             $expiresAt = $data['expires_at'] ?? null;
-            $selector = $data['selector'] ?? null;
+            $selector = null;
             $expected = $data['expected_version'] ?? null;
             $existing = DB::table('entity_deny_exceptions')
-                ->where(['deny_id' => $deny->id, 'business_id' => $business])
-                ->where(fn ($query) => $targetId !== null
-                    ? $query->where('target_id', $targetId)
-                    : $query->where('selector', $selector ?? ''))
+                ->where(['deny_id' => $deny->id, 'business_id' => $business, 'target_id' => $targetId])
                 ->lockForUpdate()->first();
 
             if ($existing !== null && (int) $existing->version !== (int) $expected) {

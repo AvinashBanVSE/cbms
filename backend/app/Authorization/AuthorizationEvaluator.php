@@ -52,7 +52,7 @@ final class AuthorizationEvaluator
                 denyReasons: (array) $cached['deny_reasons'],
                 precedence: (array) $cached['precedence'],
                 source: (string) $cached['source'],
-                catalogueVersion: (int) $cached['catalogue_version'],
+                catalogueVersion: (string) $cached['catalogue_version'],
             );
         }
 
@@ -115,7 +115,7 @@ final class AuthorizationEvaluator
                 denied: [],
                 denyReasons: [],
                 source: 'unknown_business',
-                catalogueVersion: 0,
+                catalogueVersion: PermissionCatalogue::revision(),
             );
         }
 

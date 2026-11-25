@@ -121,16 +121,35 @@ final class DenyExceptionsTest extends TestCase
         $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate'), 'action-level (no target) stays denied');
     }
 
-    /** A selector-scoped exception applies across the governed set, as it always did. */
-    public function test_selector_scope_exception_waives_the_whole_deny(): void
+    /**
+     * Finding 5.5: selector scope has no approved resource-resolution model, so it is refused at
+     * creation and a pre-existing selector exception is NOT honoured as a whole-action waiver.
+     * A deny stays in force for every record.
+     */
+    public function test_selector_scope_exception_is_refused_and_not_a_whole_action_waiver(): void
     {
         $this->deny();
+        $this->expectException(HttpException::class);
         $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
             'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 'self',
             'reason' => 'approved carve-out', 'expected_version' => 0,
         ]);
+    }
 
-        $this->assertTrue((new EntityRoleAccess)->allows($this->user->id, $this->shop, 'mapping.initiate', (string) Str::uuid7()));
+    /** A legacy selector row can never grant access — it is inert, not a whole-action waiver. */
+    public function test_legacy_selector_exception_does_not_waive_the_deny(): void
+    {
+        $denyId = $this->deny();
+        DB::table('entity_deny_exceptions')->insert([
+            'id' => (string) Str::uuid7(), 'deny_id' => $denyId, 'business_id' => $this->shop,
+            'user_id' => $this->user->id, 'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR,
+            'selector' => 'self', 'reason' => 'legacy', 'granted_by' => $this->manager->id,
+            'active' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $access = new EntityRoleAccess;
+        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate', (string) Str::uuid7()));
+        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate'));
     }
 
     public function test_exception_cannot_be_self_granted_or_created_without_a_deny(): void
@@ -138,7 +157,7 @@ final class DenyExceptionsTest extends TestCase
         $this->deny();
         $this->expectException(HttpException::class);
         $this->exceptions->save($this->user->id, $this->shop, $this->user->id, [
-            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => (string) Str::uuid7(),
             'reason' => 'self', 'expected_version' => 0,
         ]);
     }
@@ -147,7 +166,7 @@ final class DenyExceptionsTest extends TestCase
     {
         $this->expectException(HttpException::class);
         $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
-            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => (string) Str::uuid7(),
             'reason' => 'no deny', 'expected_version' => 0,
         ]);
     }
@@ -155,13 +174,14 @@ final class DenyExceptionsTest extends TestCase
     public function test_stale_version_is_rejected(): void
     {
         $this->deny();
+        $target = (string) Str::uuid7();
         $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
-            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => $target,
             'reason' => 'first', 'expected_version' => 0,
         ]);
         $this->expectException(HttpException::class);
         $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
-            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 's',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => $target,
             'reason' => 'second', 'expected_version' => 0,
         ]);
     }

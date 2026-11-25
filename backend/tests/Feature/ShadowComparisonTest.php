@@ -126,17 +126,51 @@ final class ShadowComparisonTest extends TestCase
             'action' => 'mapping.initiate', 'reason' => 'compliance hold', 'created_by' => $manager,
         ]);
         (new DenyExceptions)->save($manager, $shop, $user, [
-            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'approved carve-out',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD,
+            'target_id' => (string) Str::uuid7(), 'reason' => 'approved record carve-out',
         ]);
         AuthorizationVersion::bump($shop);
 
-        $this->assertTrue(
-            (new EntityRoleAccess)->allows($user, $shop, 'mapping.initiate'),
-            'legacy must allow inside a governed exception'
-        );
-        $this->assertTrue(
+        // The evaluator is action-level: a record-scoped carve-out narrows a waiver to one record,
+        // so at action level the deny still holds and the evaluator must NOT report an allow.
+        $this->assertFalse(
             in_array('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed, true),
-            'evaluator must honor governed deny exceptions or parity data is wrong'
+            'evaluator must not report an action-level allow from a record-scoped exception'
+        );
+    }
+
+    /** A standing deny suppresses the role grant at action level; a record carve-out cannot widen it. */
+    public function test_evaluator_action_level_deny_holds_despite_a_record_carve_out(): void
+    {
+        [$portal, $shop, $user] = $this->seedShop();
+        $manager = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr@example.test', 'password' => 'x']);
+        DB::table('portal_grants')->insert(['user_id' => $manager, 'business_id' => $portal, 'permission' => 'organization_users.manage']);
+        $role = (string) Str::uuid7();
+        DB::table('organization_business_roles')->insert(['id' => $role, 'business_id' => $shop, 'name' => 'Worker', 'governed' => true]);
+        DB::table('organization_role_permissions')->insert(['role_id' => $role, 'action' => 'mapping.initiate']);
+        DB::table('organization_role_assignments')->insert(['role_id' => $role, 'user_id' => $user]);
+        $denyId = (string) Str::uuid7();
+        DB::table('entity_permission_denies')->insert([
+            'id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'reason' => 'compliance hold', 'created_by' => $manager,
+        ]);
+        // With a standing deny and no carve-out, the role grant is suppressed at action level.
+        $this->assertFalse(
+            in_array('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed, true),
+            'a standing deny suppresses the role grant'
+        );
+
+        // A record-scoped carve-out narrows a waiver to one record. The evaluator reports
+        // action-level results, so the deny still holds — the carve-out cannot widen to the action.
+        (new DenyExceptions)->save($manager, $shop, $user, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD,
+            'target_id' => (string) Str::uuid7(), 'reason' => 'narrow record waiver',
+        ]);
+        AuthorizationVersion::bump($shop);
+        $this->assertFalse(
+            in_array('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed, true),
+            'a record carve-out must not widen to an action-level allow'
         );
     }
 
@@ -187,28 +221,27 @@ final class ShadowComparisonTest extends TestCase
         AuthorizationVersion::bump($shop);
         $this->assertNotContains('mapping.initiate', $evaluator->decide($user, $shop)->allowed, 'deny applies while live');
 
-        // The security-critical direction: a governed carve-out WAIVES the deny, so the decision
-        // is cached as allowed. When that carve-out self-expires the deny returns — but the
+        // The security-critical direction: a governed, self-expiring carve-out shortens the window
+        // during which a cached decision may live. When it lapses the deny returns — but the
         // versionKey has not changed, so a purely version-keyed cache would keep serving the
-        // expired carve-out's allow. That would restore revoked authority (§41), so the cache
-        // must not outlive the waiver. Bounded-TTL caching accepts this only if TTL is short;
-        // a long TTL here is the defect.
+        // expired waiver past expiry, restoring revoked authority (§41). The entry's lifetime must
+        // therefore be capped at the soonest time-bound expiry, not the configured TTL.
         $manager = (string) Str::uuid7();
         DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr2@test.invalid', 'password' => 'x']);
         DB::table('portal_grants')->insert(['user_id' => $manager, 'business_id' => $portal, 'permission' => 'organization_users.manage']);
-        // Reuse the standing deny above and add a self-expiring carve-out on it.
+        // Reuse the standing deny above and add a self-expiring record-scoped carve-out on it.
         (new DenyExceptions)->save($manager, $shop, $user, [
-            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'short waiver',
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD,
+            'target_id' => (string) Str::uuid7(), 'reason' => 'short record waiver',
             'expires_at' => now()->addMinutes(2)->toIso8601String(),
         ]);
         AuthorizationVersion::bump($shop);
-        $this->assertContains('mapping.initiate', $evaluator->decide($user, $shop)->allowed, 'waived while carve-out live');
         $ref = new \ReflectionMethod(AuthorizationEvaluator::class, 'soonestExpiry');
         $ref->setAccessible(true);
-        // The fix's verifiable guarantee: the entry's effective TTL is capped at the soonest
-        // time-bound expiry (the ~2 min waiver), NOT the configured 3600 s. (We assert the
-        // computed lifetime rather than a post-travel read, because the array cache store
-        // expires entries on real wall-clock that travel() does not advance.)
+        // The verifiable guarantee: the entry's effective TTL is capped at the soonest time-bound
+        // expiry (the ~2 min waiver), NOT the configured 3600 s. (We assert the computed lifetime
+        // rather than a post-travel read, because the array cache store expires entries on real
+        // wall-clock that travel() does not advance.)
         $effective = min(3600, $ref->invoke($evaluator, $user, $shop));
         $this->assertLessThanOrEqual(180, $effective, 'entry must expire by the carve-out expiry, not the configured 3600 s');
         $this->assertGreaterThan(0, $effective);
@@ -216,11 +249,11 @@ final class ShadowComparisonTest extends TestCase
 
     public function test_lapsed_carve_out_stops_waiving_the_deny(): void
     {
-        // A carve-out whose expires_at is already in the PAST must not keep waiving the standing
-        // deny. This is the mirror of the allow->deny direction: the evaluator's carve-out
-        // subquery compares against now(), so a lapsed waiver drops back to deny. (Seeded lapsed
-        // directly rather than via travel(), whose mocked now() and the stored UTC instant can
-        // disagree by the app offset and mask the real comparison.)
+        // A record-scoped carve-out whose expires_at is already in the PAST must not keep waiving
+        // the standing deny FOR ITS OWN TARGET. (Seeded lapsed directly rather than via travel(),
+        // whose mocked now() and the stored UTC instant can disagree by the app offset and mask the
+        // real comparison.) A live record carve-out does waive for its target, so this isolates the
+        // expiry boundary at record level.
         [$portal, $shop, $user] = $this->seedShop();
         $manager = (string) Str::uuid7();
         DB::table('users')->insert(['id' => $manager, 'code' => (string) Str::uuid7(), 'email' => 'mgr3@test.invalid', 'password' => 'x']);
@@ -235,17 +268,32 @@ final class ShadowComparisonTest extends TestCase
             'id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
             'action' => 'mapping.initiate', 'reason' => 'hold', 'created_by' => $manager,
         ]);
+        $target = (string) Str::uuid7();
         DB::table('entity_deny_exceptions')->insert([
             'id' => (string) Str::uuid7(), 'deny_id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
-            'action' => 'mapping.initiate', 'scope' => 'selector', 'selector' => 'self', 'reason' => 'lapsed waiver',
-            'granted_by' => $manager, 'active' => true, 'version' => 1,
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => $target,
+            'reason' => 'lapsed waiver', 'granted_by' => $manager, 'active' => true, 'version' => 1,
             'expires_at' => now()->subMinutes(5),
         ]);
         AuthorizationVersion::bump($shop);
 
-        $this->assertNotContains('mapping.initiate', (new AuthorizationEvaluator)->decide($user, $shop)->allowed,
-            'a carve-out that has lapsed must stop waiving the standing deny'
-        );
+        $access = new EntityRoleAccess;
+        // Lapsed: even its own target is denied again.
+        $this->assertFalse($access->allows($user, $shop, 'mapping.initiate', $target),
+            'a carve-out that has lapsed must stop waiving the standing deny for its own target');
+        // A live record carve-out on the same deny still waives for its own target (expiry is the
+        // only difference), proving the assertion above is about expiry, not about record scope.
+        DB::table('entity_deny_exceptions')->insert([
+            'id' => (string) Str::uuid7(), 'deny_id' => $denyId, 'business_id' => $shop, 'user_id' => $user,
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => (string) Str::uuid7(),
+            'reason' => 'live waiver', 'granted_by' => $manager, 'active' => true, 'version' => 1,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+        $this->assertFalse($access->allows($user, $shop, 'mapping.initiate', $target),
+            'a live carve-out on a DIFFERENT target does not waive this target');
+        $live = (string) DB::table('entity_deny_exceptions')->where('reason', 'live waiver')->value('target_id');
+        $this->assertTrue($access->allows($user, $shop, 'mapping.initiate', $live),
+            'a live record carve-out waives the deny for its own target');
     }
 
     public function test_shadow_comparison_reflects_the_same_decision_the_gate_serves(): void

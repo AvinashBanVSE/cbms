@@ -27,7 +27,7 @@ final class AuthorizationDecision
         public readonly array $denyReasons,
         public readonly array $precedence = [],
         public readonly string $source = 'central_evaluator',
-        public readonly int $catalogueVersion = 0,
+        public readonly string $catalogueVersion = '',
     ) {}
 
     /** @return array<string, mixed> */

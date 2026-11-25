@@ -11,12 +11,13 @@ final class EntityRoleAccess
 {
     /**
      * The carve-out predicate for one deny: an exception waives the deny ONLY inside its
-     * authorized context. A selector-scoped exception applies to the whole deny (its governed
-     * set is the scope of record); a record-scoped exception applies only when the caller is
-     * enforcing that exact target record. A caller that has no target to enforce passes null,
-     * which record-scoped exceptions deliberately do NOT satisfy — a waiver for Record A must
-     * never unblock Record B or the action at large. Keeping this in one place is what stops the
-     * exception scope being reinterpreted differently by each enforcement path.
+     * authorized context. Only record-scoped exceptions are granted (finding 5.5): one applies
+     * only when the caller is enforcing that exact target record. A caller with no target passes
+     * null, which record scope deliberately does NOT satisfy — a waiver for Record A must never
+     * unblock Record B or the action at large. A pre-existing selector-scoped exception is NOT
+     * honoured here: its set could not be resolved, so honouring it would be an unapproved
+     * whole-action waiver. Keeping this in one place is what stops the exception scope being
+     * reinterpreted differently by each enforcement path.
      *
      * $denyRef is the SQL reference of the deny row's id in the enclosing query — "restriction.id"
      * inside permissionsFor(), "entity_permission_denies.id" where the deny table is unaliased.
@@ -27,16 +28,10 @@ final class EntityRoleAccess
             $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
                 ->whereColumn('carve_out.deny_id', $denyRef)
                 ->where('carve_out.active', true)
+                ->where('carve_out.scope', 'record')
+                ->where('carve_out.target_id', $target)
                 ->where(function (Builder $expiry): void {
                     $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now());
-                })
-                ->where(function (Builder $scope) use ($target): void {
-                    // selector-scope: waives the deny across its governed set
-                    $scope->where('carve_out.scope', 'selector')
-                        // record-scope: only for the exact target being enforced
-                        ->orWhere(function (Builder $record) use ($target): void {
-                            $record->where('carve_out.scope', 'record')->where('carve_out.target_id', $target);
-                        });
                 });
         };
     }

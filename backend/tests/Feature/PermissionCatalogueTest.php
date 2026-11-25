@@ -18,6 +18,50 @@ final class PermissionCatalogueTest extends TestCase
 {
     use RefreshDatabase;
 
+    /** Deactivation bumps version AND flips active — the revision must still move (5.7). */
+    public function test_revision_moves_when_a_permission_is_deactivated(): void
+    {
+        $before = PermissionCatalogue::revision();
+        $code = DB::table('permission_definitions')->where('active', true)->value('code');
+        $version = (int) DB::table('permission_definitions')->where('code', $code)->value('version');
+
+        DB::table('permission_definitions')->where('code', $code)->update([
+            'active' => false, 'version' => $version + 1,
+        ]);
+
+        $this->assertNotSame($before, PermissionCatalogue::revision());
+    }
+
+    /** A non-maximum permission's edit must move the revision, not just the max-version row. */
+    public function test_revision_moves_when_a_non_maximum_permission_version_changes(): void
+    {
+        $maxCode = DB::table('permission_definitions')->orderByDesc('version')->value('code');
+        $otherCode = DB::table('permission_definitions')->where('code', '!=', $maxCode)->value('code');
+        $version = (int) DB::table('permission_definitions')->where('code', $otherCode)->value('version');
+
+        $before = PermissionCatalogue::revision();
+        DB::table('permission_definitions')->where('code', $otherCode)->update(['version' => $version + 1]);
+
+        $this->assertNotSame($before, PermissionCatalogue::revision());
+    }
+
+    /** Reactivating moves the revision again, and an applicability change moves it too. */
+    public function test_revision_moves_on_reactivation_and_applicability_change(): void
+    {
+        $code = DB::table('permission_definitions')->where('active', false)->value('code')
+            ?? DB::table('permission_definitions')->value('code');
+        DB::table('permission_definitions')->where('code', $code)->update(['active' => false]);
+        $deactivated = PermissionCatalogue::revision();
+
+        DB::table('permission_definitions')->where('code', $code)->update(['active' => true]);
+        $this->assertNotSame($deactivated, PermissionCatalogue::revision());
+
+        $id = DB::table('permission_definitions')->where('code', $code)->value('id');
+        $before = PermissionCatalogue::revision();
+        DB::table('permission_applicability')->where('permission_id', $id)->limit(1)->delete();
+        $this->assertNotSame($before, PermissionCatalogue::revision());
+    }
+
     public function test_catalogue_is_shared_but_applicability_is_independent(): void
     {
         $this->assertSame(PermissionCatalogue::actions('Shop'), PermissionCatalogue::actions('Distributor'));
