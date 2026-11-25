@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Central Authorization Evaluator — change walkthrough</title>
+<style>
+  :root{
+    --bg:#0f1222; --panel:#181c33; --panel2:#1f2440; --line:#2c3357;
+    --text:#e8eaf6; --muted:#9aa2c7; --brand:#5b7cfa; --brand2:#8a5bfa;
+    --allow:#2fbf71; --deny:#e5534b; --waive:#e3a008; --cache:#3fbcd6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 20px 80px}
+  header h1{font-size:26px;margin:0 0 6px}
+  header p{color:var(--muted);margin:0 0 28px;max-width:820px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .card h2 .tag{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--brand);color:#fff}
+  .card .sub{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  pre{background:#0b0e1d;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;font-size:12px;margin:10px 0 0}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.allow{background:rgba(47,191,113,.15);color:var(--allow);border:1px solid rgba(47,191,113,.35)}
+  .pill.deny{background:rgba(229,83,75,.15);color:var(--deny);border:1px solid rgba(229,83,75,.35)}
+  .pill.waive{background:rgba(227,160,8,.15);color:var(--waive);border:1px solid rgba(227,160,8,.35)}
+  .pill.cache{background:rgba(63,188,214,.15);color:var(--cache);border:1px solid rgba(63,188,214,.35)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600}
+  .flow{display:flex;flex-direction:column;gap:0}
+  .step{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)}
+  .step:last-child{border-bottom:none}
+  .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted)}
+  .step .lbl{font-size:12.5px}
+  .fix{border-left:3px solid var(--allow);padding-left:10px;margin-top:12px;font-size:12.5px}
+  .fix.was{border-color:var(--deny)}
+  .fix em{color:var(--muted);font-style:normal}
+  .sim{margin-top:14px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:6px;background:var(--panel);border:1px solid var(--line)}
+  .row .who{font-size:12.5px}
+  .row .who span{display:block;color:var(--muted);font-size:11px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  .out{margin-top:10px;font-size:12.5px;min-height:20px;color:var(--muted)}
+  footer{margin-top:30px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Central Authorization Evaluator — बदलांचे डेमो</h1>
+    <p>Central evaluator (shadow mode) चा parity divergence, decision-cache staleness आणि assigned-role edit approval — या तिन्ही बदलांचा व्यवहार दाखवतो. Legacy आणि central evaluator कडे समान निर्णय हवेत, नाहीतर cutover चुकीची authority काढेल.</p>
+  </header>
+
+  <div class="grid">
+
+    <section class="card">
+      <h2>Fix 1 <span class="tag">parity divergence</span></h2>
+      <p class="sub">Governed carve-out (D1 deny exception) legacy कडे deny suppress करतो; evaluator आधी ignore करत होता.</p>
+
+      <div class="sim">
+        <div class="row"><div class="who">व्यक्ती: <b>Priya</b><span>role grant <code>mapping.initiate</code></span></div><span class="pill allow">legacy ALLOW</span></div>
+        <div class="row"><div class="who">+ टाळा (deny)<span><code>mapping.initiate</code> कारण: hold</span></div><span class="pill deny">legacy DENY</span></div>
+        <div class="row"><div class="who">+ carve-out (exception)<span>मॅनेजरने waiver दिला, active</span></div><span id="f1-result" class="pill allow">?</span></div>
+        <div class="btns"><button id="f1-toggle">carve-out काढा / जोडा</button></div>
+        <div id="f1-out" class="out">carve-out असताना दोन्ही कडे ALLOW हवे.</div>
+      </div>
+
+      <div class="fix was"><b>आधी (bug):</b> evaluator carve-out न पाहता denies वाचत होता → legacy ALLOW, evaluator DENY → <em>cutover केल्यास waived authority चुकीने काढली जाईल.</em></div>
+      <div class="fix"><b>आता:</b> deny query मध्ये legacy सारखीच carve-out subquery — दोन्ही कडे <b>ALLOW</b>, parity साधला.</div>
+
+      <pre>denies = entity_permission_denies
+         where user, business, active
+         whereNotExists (
+           entity_deny_exceptions e
+           where e.deny_id = denies.id
+             and (e.expires_at is null
+                  or e.expires_at &gt; now())
+         )</pre>
+    </section>
+
+    <section class="card">
+      <h2>Fix 2 <span class="tag">cache staleness</span></h2>
+      <p class="sub">Cache केवळ versionKey वर key होते; म्याद संपलेला carve-out version bump न करता ALLOW परत देत होता.</p>
+
+      <div class="sim">
+        <div class="row"><div class="who">टाळा + carve-out (waiver)<span>carve-out <code>expires_at = now+2m</code>, cache TTL <code>60m</code></span></div><span class="pill waive">waiver लागू</span></div>
+        <div class="row"><div class="who">Cache entry<span>key = sha1(user|versionKey)</span></div><span id="f2-ttl" class="pill cache">TTL 60m</span></div>
+        <div class="row"><div class="who">carve-out म्याद संपली<span>version bump नाही → key सारखाच</span></div><span id="f2-after" class="pill waive">?</span></div>
+        <div class="btns">
+          <button id="f2-apply">Fix लागू करा</button>
+          <button id="f2-reset" class="ghost">पुन्हा सुरू</button>
+        </div>
+        <div id="f2-out" class="out">Fix शिवाय cache 60 मिनिटे stale ALLOW देत राहतो.</div>
+      </div>
+
+      <div class="fix was"><b>आधी:</b> versionKey न बदलल्याने cache stale ALLOW serve करत राहतो → <em>रद्द केलेली authority परत मिळते (§41 उल्लंघन).</em></div>
+      <div class="fix"><b>आता:</b> entry चा TTL सर्वात जवळच्या future expiry पर्यंत capped (<code>min(config, soonestExpiry)</code>) → waiver संपेपर्यंत entry गायब.</div>
+
+      <pre>$ttl = min(config('...ttl'), soonestExpiry(user,biz))
+soonestExpiry = min(expires_at of live denies
+                    + deny-exceptions &gt; now) or null</pre>
+    </section>
+
+    <section class="card">
+      <h2>D3 <span class="tag">assigned-role edit</span></h2>
+      <p class="sub">भूमिका असाइन केलेली असेल तर permission edit थेट न लागू होता approval मधून जातो.</p>
+
+      <div class="flow">
+        <div class="step"><div class="n">1</div><div class="lbl"><b>requestEdit</b> — proposed actions <code>edit_payload</code> मध्ये freeze, लागू <b>नाही</b></div></div>
+        <div class="step"><div class="n">2</div><div class="lbl">policy नाही → <span class="pill deny">refuse</span> (silent auto-approve नाही)</div></div>
+        <div class="step"><div class="n">3</div><div class="lbl">आधीचा pending बदल → <code>invalidated</code></div></div>
+        <div class="step"><div class="n">4</div><div class="lbl">stages मध्ये पुरेसे independent eligible reviewers नसेल → refuse</div></div>
+        <div class="step"><div class="n">5</div><div class="lbl"><b>decide</b> — requester/beneficiary approve करू <b>शकत नाही</b>; fingerprint+version बदलला तर <span class="pill deny">invalidate</span></div></div>
+        <div class="step"><div class="n">6</div><div class="lbl">मंजूर झाल्यावरच <b>applyEdit</b> — role version+1, assignment rows कायम</div></div>
+      </div>
+
+      <pre>requestEdit → freeze payload, stage reviewers
+decide      → authority re-checked vs frozen actions
+              fingerprint(env, requester, user) match
+applyEdit   → version+1, keep assignments, audit</pre>
+    </section>
+
+    <section class="card">
+      <h2>Shadow comparison <span class="tag">parity evidence</span></h2>
+      <p class="sub">compare() evaluator कडे <code>decide()</code> द्वारे जातो — enforcement वापरतो तोच cached path. Parity evidence enforcement पेक्षा अधिक ताजे कधीच नसू शकत.</p>
+      <table>
+        <thead><tr><th>कृती</th><th>legacy</th><th>evaluator</th><th>match</th></tr></thead>
+        <tbody>
+          <tr><td>mapping.initiate</td><td class="mono">allow</td><td class="mono">allow</td><td><span class="pill allow">match</span></td></tr>
+          <tr><td>revoke नंतर (version bump)</td><td class="mono">deny</td><td class="mono">deny</td><td><span class="pill allow">match</span></td></tr>
+          <tr><td>carve-out असताना</td><td class="mono">allow</td><td class="mono">allow</td><td><span class="pill allow">match</span></td></tr>
+        </tbody>
+      </table>
+      <div class="fix"><b>हमी:</b> revoke मध्ये version bump → cache invalidate → parity व enforcement दोन्ही deny दिसतात; stale allow parity tool ला कधीच दिसत नाही.</div>
+    </section>
+
+  </div>
+
+  <footer>
+    सर्व बदल central evaluator cache + cutover gate मागे <b>default-off</b> आहेत — आजचे production authority वर्तन बदललेले नाही.
+    Tests: 136 / 1919 assertions OK; Pint clean; contracts fresh.
+  </footer>
+</div>
+
+<script>
+  let carve = true;
+  const f1r = document.getElementById('f1-result'), f1o = document.getElementById('f1-out');
+  function renderF1(){
+    if(carve){ f1r.className='pill allow'; f1r.textContent='दोन्ही ALLOW (parity)'; f1o.textContent='carve-out active → टाळा suppress → evaluator आता legacy सारखाच ALLOW.'; }
+    else { f1r.className='pill deny'; f1r.textContent='दोन्ही DENY'; f1o.textContent='carve-out नाही → टाळा लागू → दोन्ही कडे DENY, तरीही parity.'; }
+  }
+  document.getElementById('f1-toggle').onclick = ()=>{ carve=!carve; renderF1(); };
+  renderF1();
+
+  const f2ttl=document.getElementById('f2-ttl'), f2after=document.getElementById('f2-after'), f2o=document.getElementById('f2-out');
+  let fixed=false;
+  function renderF2(){
+    if(fixed){ f2ttl.className='pill cache'; f2ttl.textContent='TTL 2m (capped)'; f2after.className='pill deny'; f2after.textContent='cache गायब → DENY'; f2o.textContent='Fix लागू: entry waiver संपण्यापूर्वीच संपते, stale ALLOW कधीच परत येत नाही.'; }
+    else { f2ttl.className='pill cache'; f2ttl.textContent='TTL 60m (config)'; f2after.className='pill waive'; f2after.textContent='stale ALLOW 60m'; f2o.textContent='Fix शिवाय: carve-out संपला तरी cache stale ALLOW देत राहतो (रद्द केलेली authority परत).'; }
+  }
+  document.getElementById('f2-apply').onclick=()=>{fixed=true;renderF2();};
+  document.getElementById('f2-reset').onclick=()=>{fixed=false;renderF2();};
+  renderF2();
+</script>
+</body>
+</html>
