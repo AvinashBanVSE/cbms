@@ -23,7 +23,7 @@ See entity-role-api.md for payloads, boundaries and migration details.
 
 ## Validation
 
-PHP 8.4 with locked Composer dependencies; SQLite automated suite: **138 tests, 1,930 assertions passed**. PCOV statement coverage **91.89% (4,171 / 4,539)**; repository 90% gate passes. Pint, diff checks and refreshed contract verification pass.
+PHP 8.4 with locked Composer dependencies; SQLite automated suite: **138 tests, 1,929 assertions passed**. PCOV statement coverage **91.89% (4,171 / 4,539)**; repository 90% gate passes. Pint and refreshed contract verification pass.
 
 Security coverage includes all five entity kinds, same-name independence, grant ceilings, use-versus-grant distinction, tenant isolation, missing/removed scope, account state changes, legacy bypass rejection, stale role versions, assigned-role edit rejection, self/beneficiary approval rejection, distinct votes and sequential stages, expiry/rejection, repeated execution, policy/catalogue changes invalidating requests, reviewer-only inboxes, independent copies and client-administration role integration. A populated pre-upgrade database test verifies legacy permissions/assignments/scopes are preserved. PostgreSQL concurrency/load testing and frontend E2E are not claimed by this SQLite suite.
 
