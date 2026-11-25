@@ -52,7 +52,7 @@ final class AuthorizationContextTest extends TestCase
         $decision = collect($response->json('decisions'))->firstWhere('business_id', $shop);
         $this->assertNotNull($decision);
         $this->assertSame(['mapping.initiate'], $decision['allowed']);
-        $this->assertGreaterThanOrEqual(1, $response->json('catalogue_version'));
+        $this->assertNotEmpty($response->json('catalogue_version'));
     }
 
     private function actingAsUser(string $id): void

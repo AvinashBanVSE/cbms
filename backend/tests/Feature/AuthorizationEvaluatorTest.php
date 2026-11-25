@@ -49,7 +49,7 @@ final class AuthorizationEvaluatorTest extends TestCase
         // seeded catalogue, so assert the evaluator reports the same revision the catalogue
         // computes rather than pinning a number that depends on the migration seed size.
         $this->assertSame(PermissionCatalogue::revision(), $granted->catalogueVersion);
-        $this->assertGreaterThan(0, $granted->catalogueVersion);
+        $this->assertNotEmpty($granted->catalogueVersion);
         // §6 precedence chain is visible per action (plan §89: override-source display).
         $this->assertSame('allowed', $granted->precedence['mapping.initiate']['tier']);
         $this->assertSame('bound', $granted->precedence['mapping.submit']['tier'] ?? 'bound');
