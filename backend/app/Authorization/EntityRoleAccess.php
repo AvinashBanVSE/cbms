@@ -9,40 +9,46 @@ use Illuminate\Support\Facades\DB;
 
 final class EntityRoleAccess
 {
-    /** Current membership AND explicit scope; role assignment never supplies either. */
-    public function eligible(string $user, string $business): bool
+    /**
+     * The carve-out predicate for one deny: an exception waives the deny ONLY inside its
+     * authorized context. A selector-scoped exception applies to the whole deny (its governed
+     * set is the scope of record); a record-scoped exception applies only when the caller is
+     * enforcing that exact target record. A caller that has no target to enforce passes null,
+     * which record-scoped exceptions deliberately do NOT satisfy — a waiver for Record A must
+     * never unblock Record B or the action at large. Keeping this in one place is what stops the
+     * exception scope being reinterpreted differently by each enforcement path.
+     *
+     * $denyRef is the SQL reference of the deny row's id in the enclosing query — "restriction.id"
+     * inside permissionsFor(), "entity_permission_denies.id" where the deny table is unaliased.
+     */
+    public static function carvesOut(string $denyRef, ?string $target): \Closure
     {
-        $entity = DB::table('business_identities')->where('id', $business)->first();
-        if ($entity === null || $entity->operational_state !== 'Active') {
-            return false;
-        }
-        $customer = DB::table('customer_accounts')->where('user_id', $user)->first();
-        $provider = DB::table('provider_accounts')->where('user_id', $user)->first();
-        if (in_array($entity->kind, ['Organization', 'Distributor', 'Shop'], true)) {
-            if ($customer === null || $customer->state !== 'Active') {
-                return false;
-            }
-            $organization = DB::table('customer_tenants')->where('id', $customer->tenant_id)->value('organization_id');
-
-            return ($entity->kind === 'Organization' ? $entity->id === $organization : $entity->parent_id === $organization)
-                && DB::table('business_identities')->where('id', $organization)->where('operational_state', 'Active')->exists()
-                && DB::table('customer_business_associations')->where(['user_id' => $user, 'business_id' => $business, 'active' => true])->exists()
-                && DB::table('customer_business_scopes')->where(['user_id' => $user, 'business_id' => $business])->exists();
-        }
-        if ($customer !== null || ! DB::table('entity_user_scopes')->where(['user_id' => $user, 'business_id' => $business])->exists()) {
-            return false;
-        }
-
-        return match ($entity->kind) {
-            'Sub-Portal' => $provider !== null && $provider->state === 'Active' && $provider->provider_id === $business,
-            'Main Portal' => $provider === null && DB::table('users')->where('id', $user)->exists()
-                && DB::table('portal_installation')->where(['id' => 1, 'portal_id' => $business, 'stage' => 'ready'])->exists(),
-            default => false,
+        return function (Builder $exception) use ($denyRef, $target): void {
+            $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
+                ->whereColumn('carve_out.deny_id', $denyRef)
+                ->where('carve_out.active', true)
+                ->where(function (Builder $expiry): void {
+                    $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now());
+                })
+                ->where(function (Builder $scope) use ($target): void {
+                    // selector-scope: waives the deny across its governed set
+                    $scope->where('carve_out.scope', 'selector')
+                        // record-scope: only for the exact target being enforced
+                        ->orWhere(function (Builder $record) use ($target): void {
+                            $record->where('carve_out.scope', 'record')->where('carve_out.target_id', $target);
+                        });
+                });
         };
     }
 
-    /** Valid role grants only. Existing callers still apply their own resource boundaries. */
-    public static function permissionsFor(string $user): Builder
+    /**
+     * Valid role grants only. Existing callers still apply their own resource boundaries.
+     *
+     * $target is the specific record being enforced, when the caller knows it. Passing it lets a
+     * record-scoped deny exception apply; omitting it (null) leaves record-scoped exceptions
+     * inert so they cannot silently widen the action to every record.
+     */
+    public static function permissionsFor(string $user, ?string $target = null): Builder
     {
         return DB::table('organization_role_assignments as assignment')
             ->join('organization_business_roles as role', 'role.id', '=', 'assignment.role_id')
@@ -54,7 +60,7 @@ final class EntityRoleAccess
             })
             ->where('assignment.user_id', $user)->where('role.governed', true)->where('role.archived', false)
             ->where('definition.active', true)->where('business.operational_state', 'Active')
-            ->whereNotExists(function (Builder $deny) use ($user): void {
+            ->whereNotExists(function (Builder $deny) use ($user, $target): void {
                 $deny->selectRaw('1')->from('entity_permission_denies as restriction')
                     ->where('restriction.user_id', $user)
                     ->whereColumn('restriction.business_id', 'role.business_id')
@@ -63,14 +69,7 @@ final class EntityRoleAccess
                         $expiry->whereNull('restriction.expires_at')->orWhere('restriction.expires_at', '>', now());
                     })
                     // A governed exception waives the matching deny at its narrower context.
-                    ->whereNotExists(function (Builder $exception): void {
-                        $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
-                            ->whereColumn('carve_out.deny_id', 'restriction.id')
-                            ->where('carve_out.active', true)
-                            ->where(function (Builder $expiry): void {
-                                $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now());
-                            });
-                    });
+                    ->whereNotExists(self::carvesOut('restriction.id', $target));
             })
             ->where(function (Builder $context) use ($user): void {
                 $context->where(function (Builder $customer) use ($user): void {
@@ -109,18 +108,52 @@ final class EntityRoleAccess
             ->select('role.business_id', 'permission.action');
     }
 
-    public function allows(string $user, string $business, string $action): bool
+    /** Current membership AND explicit scope; role assignment never supplies either. */
+    public function eligible(string $user, string $business): bool
+    {
+        $entity = DB::table('business_identities')->where('id', $business)->first();
+        if ($entity === null || $entity->operational_state !== 'Active') {
+            return false;
+        }
+        $customer = DB::table('customer_accounts')->where('user_id', $user)->first();
+        $provider = DB::table('provider_accounts')->where('user_id', $user)->first();
+        if (in_array($entity->kind, ['Organization', 'Distributor', 'Shop'], true)) {
+            if ($customer === null || $customer->state !== 'Active') {
+                return false;
+            }
+            $organization = DB::table('customer_tenants')->where('id', $customer->tenant_id)->value('organization_id');
+
+            return ($entity->kind === 'Organization' ? $entity->id === $organization : $entity->parent_id === $organization)
+                && DB::table('business_identities')->where('id', $organization)->where('operational_state', 'Active')->exists()
+                && DB::table('customer_business_associations')->where(['user_id' => $user, 'business_id' => $business, 'active' => true])->exists()
+                && DB::table('customer_business_scopes')->where(['user_id' => $user, 'business_id' => $business])->exists();
+        }
+        if ($customer !== null || ! DB::table('entity_user_scopes')->where(['user_id' => $user, 'business_id' => $business])->exists()) {
+            return false;
+        }
+
+        return match ($entity->kind) {
+            'Sub-Portal' => $provider !== null && $provider->state === 'Active' && $provider->provider_id === $business,
+            'Main Portal' => $provider === null && DB::table('users')->where('id', $user)->exists()
+                && DB::table('portal_installation')->where(['id' => 1, 'portal_id' => $business, 'stage' => 'ready'])->exists(),
+            default => false,
+        };
+    }
+
+    /**
+     * Action-level check. $target is the record being enforced when the caller knows it; a
+     * record-scoped deny exception then applies only to that record. Without a target, a
+     * record-scoped exception stays inert so it cannot unblock the action for every record.
+     */
+    public function allows(string $user, string $business, string $action, ?string $target = null): bool
     {
         $deny = DB::table('entity_permission_denies')->where(['user_id' => $user, 'business_id' => $business, 'action' => $action])
             ->where(fn (Builder $query): Builder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-            ->whereNotExists(fn (Builder $exception) => $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
-                ->whereColumn('carve_out.deny_id', 'entity_permission_denies.id')
-                ->where('carve_out.active', true)
-                ->where(fn (Builder $expiry): object => $expiry->whereNull('carve_out.expires_at')->orWhere('carve_out.expires_at', '>', now())))
+            ->whereNotExists(self::carvesOut('entity_permission_denies.id', $target))
             ->exists();
 
         return ! $deny
-            && self::permissionsFor($user)->where('role.business_id', $business)->where('permission.action', $action)->exists();
+            && self::permissionsFor($user, $target)->where('role.business_id', $business)->where('permission.action', $action)->exists();
     }
 
     public function manages(string $user, string $business): bool

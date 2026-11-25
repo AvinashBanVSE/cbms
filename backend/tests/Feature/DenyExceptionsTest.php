@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Authorization\DenyExceptions;
+use App\Authorization\EntityRoleAccess;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -97,6 +98,39 @@ final class DenyExceptionsTest extends TestCase
             'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD,
             'reason' => 'x', 'expected_version' => 0,
         ]);
+    }
+
+    /**
+     * Finding 5.2: a record-scoped exception waives the deny ONLY for its own target. Record A
+     * is allowed, Record B and an unknown record stay denied, and the action with no target at
+     * all stays denied — the exception must never widen into a whole-action waiver.
+     */
+    public function test_record_scope_exception_applies_only_to_its_target(): void
+    {
+        $this->deny();
+        $recordA = (string) Str::uuid7();
+        $recordB = (string) Str::uuid7();
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::RECORD, 'target_id' => $recordA,
+            'reason' => 'approved for A', 'expected_version' => 0,
+        ]);
+
+        $access = new EntityRoleAccess;
+        $this->assertTrue($access->allows($this->user->id, $this->shop, 'mapping.initiate', $recordA), 'waived for Record A');
+        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate', $recordB), 'Record B stays denied');
+        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate'), 'action-level (no target) stays denied');
+    }
+
+    /** A selector-scoped exception applies across the governed set, as it always did. */
+    public function test_selector_scope_exception_waives_the_whole_deny(): void
+    {
+        $this->deny();
+        $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
+            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 'self',
+            'reason' => 'approved carve-out', 'expected_version' => 0,
+        ]);
+
+        $this->assertTrue((new EntityRoleAccess)->allows($this->user->id, $this->shop, 'mapping.initiate', (string) Str::uuid7()));
     }
 
     public function test_exception_cannot_be_self_granted_or_created_without_a_deny(): void

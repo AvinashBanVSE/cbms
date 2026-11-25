@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Authorization\AuthorizationEvaluator;
+use App\Authorization\PermissionCatalogue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -44,7 +45,11 @@ final class AuthorizationEvaluatorTest extends TestCase
         $granted = $evaluator->decide($id, $shop);
         $this->assertSame(['mapping.initiate'], $granted->allowed);
         $this->assertSame([], $granted->denied);
-        $this->assertSame(1, $granted->catalogueVersion);
+        // catalogueVersion is the catalogue revision, not a literal: it reflects the whole
+        // seeded catalogue, so assert the evaluator reports the same revision the catalogue
+        // computes rather than pinning a number that depends on the migration seed size.
+        $this->assertSame(PermissionCatalogue::revision(), $granted->catalogueVersion);
+        $this->assertGreaterThan(0, $granted->catalogueVersion);
         // §6 precedence chain is visible per action (plan §89: override-source display).
         $this->assertSame('allowed', $granted->precedence['mapping.initiate']['tier']);
         $this->assertSame('bound', $granted->precedence['mapping.submit']['tier'] ?? 'bound');
@@ -94,12 +99,20 @@ final class AuthorizationEvaluatorTest extends TestCase
 
         $evaluator = new AuthorizationEvaluator;
 
-        $key = $evaluator->versionKey($shop);
-        $this->assertSame('catalogue=1;entity=0', $key);
+        $revision = PermissionCatalogue::revision();
+        $this->assertSame("catalogue={$revision};entity=0", $evaluator->versionKey($shop));
 
         // A transactional authorization-version bump changes the key (§8 cache invalidation input).
         DB::table('entity_authorization_versions')->insertOrIgnore(['business_id' => $shop, 'version' => 0]);
         DB::table('entity_authorization_versions')->where('business_id', $shop)->increment('version');
-        $this->assertSame('catalogue=1;entity=1', $evaluator->versionKey($shop));
+        $this->assertSame("catalogue={$revision};entity=1", $evaluator->versionKey($shop));
+
+        // A catalogue change to a NON-maximum permission still moves the revision: a per-
+        // definition max(version) would miss it and leave a cached decision valid across a real
+        // catalogue change (finding 5.4).
+        $stale = $evaluator->versionKey($shop);
+        $min = DB::table('permission_definitions')->where('active', true)->orderBy('version')->first();
+        DB::table('permission_definitions')->where('id', $min->id)->update(['version' => (int) $min->version + 1]);
+        $this->assertNotSame($stale, $evaluator->versionKey($shop));
     }
 }

@@ -74,10 +74,38 @@ final class ShadowComparisonTest extends TestCase
 
         // The decision is genuinely cached: a second read with no change hits the cache, and
         // changing authority bumps the version (new key) so the stale entry is never served.
-        $key = 'auth.decision.'.sha1($user.'|'.$evaluator->versionKey($shop));
+        $key = 'auth.decision.'.sha1($user.'|'.$shop.'|'.$evaluator->versionKey($shop));
         $this->assertNotNull(Cache::get($key));
         Cache::forget($key);
         $this->assertNull(Cache::get($key));
+    }
+
+    /** Finding 5.3: a cached decision must not leak one business's permissions into another. */
+    public function test_cache_key_is_isolated_per_business_entity(): void
+    {
+        [$portal, $shopA, $user] = $this->seedShop();
+        config(['authorization.evaluator_decisions_cached' => true]);
+
+        // A second, unrelated Shop for the same user with NO grant. It is seeded to mirror the
+        // eligibility shape but holds no permission, so a leaked Shop-A decision would wrongly
+        // allow there.
+        $shopB = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $shopB, 'kind' => 'Shop', 'professional_name' => 'B', 'parent_id' => DB::table('business_identities')->where('id', $shopA)->value('parent_id')]);
+        DB::table('customer_business_associations')->insert(['user_id' => $user, 'business_id' => $shopB, 'active' => true]);
+        DB::table('customer_business_scopes')->insert(['user_id' => $user, 'business_id' => $shopB]);
+
+        // Shop A has the permission and is read first, populating its cache entry.
+        $evaluator = new AuthorizationEvaluator;
+        DB::table('customer_permissions')->insert(['user_id' => $user, 'business_id' => $shopA, 'action' => 'mapping.initiate']);
+        $this->assertContains('mapping.initiate', $evaluator->decide($user, $shopA)->allowed);
+
+        // Both entities hold the same authorization version (0) and the catalogue revision is
+        // shared, so versionKey() is identical for both. A key derived from that alone would
+        // collide and replay Shop A's allow into Shop B.
+        $this->assertSame($evaluator->versionKey($shopA), $evaluator->versionKey($shopB));
+
+        // Shop B must deny on its own merits — never inherit Shop A's cached allow.
+        $this->assertSame([], $evaluator->decide($user, $shopB)->allowed);
     }
 
     public function test_evaluator_must_honor_governed_deny_exceptions_like_legacy(): void

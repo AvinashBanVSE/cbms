@@ -35,7 +35,11 @@ final class AuthorizationEvaluator
             return $this->compute($user, $businessId);
         }
 
-        $key = 'auth.decision.'.sha1($user.'|'.$this->versionKey($businessId));
+        // The business id is part of the key, not just the version material: two entities can hold
+        // the same authorization version, so keying on the version alone would let a decision cached
+        // for one business be replayed for another — leaking its permissions across the tenant
+        // boundary. Binding the business id keeps every cached decision scoped to its own entity.
+        $key = 'auth.decision.'.sha1($user.'|'.$businessId.'|'.$this->versionKey($businessId));
 
         /** @var array<string, mixed>|null $cached */
         $cached = Cache::get($key);
@@ -116,7 +120,7 @@ final class AuthorizationEvaluator
         }
 
         $kind = (string) $business->kind;
-        $version = (int) (DB::table('permission_definitions')->where('active', true)->max('version') ?? 0);
+        $version = PermissionCatalogue::revision();
 
         $direct = DB::table('customer_permissions')
             ->where('user_id', $user)->where('business_id', $businessId)
@@ -128,18 +132,18 @@ final class AuthorizationEvaluator
         // Explicit denies win over grants, BUT a governed deny exception (D1 carve-out) waives
         // the deny inside its narrower context — the legacy allows() path honours it, so the
         // evaluator must too or parity data and any later cutover would wrongly revoke the
-        // waived authority. An active exception on the deny suppresses that deny here.
+        // waived authority. An active exception on the deny suppresses that deny here, but only
+        // within the exception's scope: decide() is action-level (no target record), so a
+        // record-scoped exception stays inert — it must never widen one record's waiver into an
+        // allow for every record. Sharing EntityRoleAccess::carvesOut(null) keeps the evaluator
+        // and the legacy path on one identical predicate.
         $denies = DB::table('entity_permission_denies')
             ->where('business_id', $businessId)
             ->where('user_id', $user)
             ->where(function ($query): void {
                 $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
             })
-            ->whereNotExists(fn ($exception) => $exception->selectRaw('1')->from('entity_deny_exceptions as carve_out')
-                ->whereColumn('carve_out.deny_id', 'entity_permission_denies.id')
-                ->where('carve_out.active', true)
-                ->where(fn ($expiry) => $expiry->whereNull('carve_out.expires_at')
-                    ->orWhere('carve_out.expires_at', '>', now())))
+            ->whereNotExists(EntityRoleAccess::carvesOut('entity_permission_denies.id', null))
             ->get(['action', 'reason']);
 
         $denyReasons = [];
@@ -220,7 +224,7 @@ final class AuthorizationEvaluator
      */
     public function versionKey(string $businessId): string
     {
-        $catalogue = (int) (DB::table('permission_definitions')->where('active', true)->max('version') ?? 0);
+        $catalogue = PermissionCatalogue::revision();
         $entity = (int) (DB::table('entity_authorization_versions')->where('business_id', $businessId)->value('version') ?? 0);
 
         return "catalogue={$catalogue};entity={$entity}";
