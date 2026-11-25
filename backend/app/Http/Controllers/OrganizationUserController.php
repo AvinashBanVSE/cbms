@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Accounts\SetupDelivery;
 use App\Accounts\SetupOtpPolicy;
 use App\Accounts\UserCode;
+use App\Authorization\AuthorizationVersion;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\MappingPermissions;
 use App\Authorization\OrganizationOnboardingAccess;
@@ -115,6 +116,9 @@ final class OrganizationUserController
             foreach ($input['actions'] as $action) {
                 DB::table('customer_permissions')->insert([...$binding, 'action' => $action]);
             }
+            // Association, scope and direct grants all feed the cached evaluator decision for this
+            // entity, so the version must move before the change commits or a cached deny survives.
+            AuthorizationVersion::bump($input['business_id']);
             $this->record($id, 'organization_user.provisioned');
 
             return $code;
@@ -154,6 +158,8 @@ final class OrganizationUserController
                 'action' => $permission,
             ])->delete();
             abort_unless($removed === 1, 404);
+            // A revoked onboarding/recovery grant must invalidate any cached allow for the entity.
+            AuthorizationVersion::bump((string) $context->organization_id);
             $this->record($context->user_id, $permission === OrganizationOnboardingAccess::RECOVERY
                 ? 'organization_user.recovery_authority_revoked' : 'organization_user.onboarding_authority_revoked');
         }, attempts: 3);

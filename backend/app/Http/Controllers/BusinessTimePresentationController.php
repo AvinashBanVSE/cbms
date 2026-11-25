@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Authorization\AuthorizationVersion;
 use App\Authorization\MainPortalAccess;
 use App\Authorization\OrganizationTimePresentationAccess;
 use App\Configuration\BusinessTimePresentation;
@@ -120,6 +121,8 @@ final class BusinessTimePresentationController
             $grants = DB::table('customer_permissions');
             $changed = $enabled ? $grants->insertOrIgnore($binding) : $grants->where($binding)->delete();
             if ($changed > 0) {
+                // A new or removed presentation grant feeds the cached evaluator decision.
+                AuthorizationVersion::bump($business);
                 DB::table('portal_events')->insert([
                     'id' => Str::uuid7()->toString(), 'action' => 'global_business_settings.organization_access_changed',
                     'actor_id' => Auth::id(), 'subject_id' => $business, 'recorded_at' => now(),
