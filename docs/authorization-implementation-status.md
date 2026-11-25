@@ -23,9 +23,11 @@ See entity-role-api.md for payloads, boundaries and migration details.
 
 ## Validation
 
-PHP 8.4 with locked Composer dependencies; SQLite automated suite: **108 tests, 1,822 assertions passed**. PCOV statement coverage **92.10% (3,789 / 4,114)**; repository 90% gate passes. Pint, diff checks and refreshed contract verification pass.
+PHP 8.4 with locked Composer dependencies; SQLite automated suite: **131 tests, 1,918 assertions passed**. PCOV statement coverage **91.88% (4,163 / 4,531)**; repository 90% gate passes. Pint, diff checks and refreshed contract verification pass.
 
 Security coverage includes all five entity kinds, same-name independence, grant ceilings, use-versus-grant distinction, tenant isolation, missing/removed scope, account state changes, legacy bypass rejection, stale role versions, assigned-role edit rejection, self/beneficiary approval rejection, distinct votes and sequential stages, expiry/rejection, repeated execution, policy/catalogue changes invalidating requests, reviewer-only inboxes, independent copies and client-administration role integration. A populated pre-upgrade database test verifies legacy permissions/assignments/scopes are preserved. PostgreSQL concurrency/load testing and frontend E2E are not claimed by this SQLite suite.
+
+Review repairs in this increment: a scope-aware deny-exception carve-out (a record-scoped exception no longer waives the deny for every record), a business-id in the evaluator decision cache key (two entities with equal versions can no longer collide), a catalogue revision token that moves on any non-maximum permission edit, a fail-closed eligibility gate in the central evaluator (a direct grant alone cannot authorize an ineligible context), version invalidation on grant/membership writers, and a frontend approvals screen aligned to the real approval API contract (true decision status, not a blanket "applied").
 
 ## Remaining approved work
 
