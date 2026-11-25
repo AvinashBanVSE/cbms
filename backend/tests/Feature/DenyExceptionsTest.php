@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Authorization\DenyExceptions;
-use App\Authorization\EntityRoleAccess;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -88,25 +87,6 @@ final class DenyExceptionsTest extends TestCase
         ]);
 
         return $id;
-    }
-
-    public function test_exception_waives_matching_deny_within_its_scope(): void
-    {
-        $deny = $this->deny();
-        // Before exception: the deny blocks an otherwise-positively-granted action.
-        $access = new EntityRoleAccess;
-        $this->assertFalse($access->allows($this->user->id, $this->shop, 'mapping.initiate'));
-        $this->assertFalse(DenyExceptions::waives($this->user->id, $this->shop, 'mapping.initiate'));
-
-        $result = $this->exceptions->save($this->manager->id, $this->shop, $this->user->id, [
-            'action' => 'mapping.initiate', 'scope' => DenyExceptions::SELECTOR, 'selector' => 'mapping_records',
-            'reason' => 'temporary waiver', 'expected_version' => 0,
-        ]);
-        $this->assertSame(1, $result['version']);
-
-        // Selector-scope exception (no specific target) waives the deny.
-        $this->assertTrue(DenyExceptions::waives($this->user->id, $this->shop, 'mapping.initiate'));
-        $this->assertTrue((new EntityRoleAccess)->allows($this->user->id, $this->shop, 'mapping.initiate'));
     }
 
     public function test_record_scope_exception_requires_target_and_is_refused_without_it(): void

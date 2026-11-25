@@ -24,29 +24,6 @@ final class DenyExceptions
     public const SELECTOR = 'selector';
 
     /**
-     * Do any active, unexpired exceptions waive the deny on this action for this user/business?
-     * Callers pass the specific target record when enforcing per-record; a null target only
-     * matches selector-scope exceptions (never a record-scoped one).
-     */
-    public static function waives(string $user, string $business, string $action, ?string $target = null): bool
-    {
-        $match = DB::table('entity_deny_exceptions')
-            ->where(['user_id' => $user, 'business_id' => $business, 'action' => $action, 'active' => true])
-            ->where(fn ($query): object => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()));
-
-        if ($target === null) {
-            $match->where('scope', self::SELECTOR);
-        } else {
-            $match->where(function ($query) use ($target): void {
-                $query->where(fn ($record) => $record->where('scope', self::RECORD)->where('target_id', $target))
-                    ->orWhere('scope', self::SELECTOR);
-            });
-        }
-
-        return $match->exists();
-    }
-
-    /**
      * Governed create/update of an exception. Requires restriction-management authority for the
      * business and blocks self-granted exceptions (mirrors the deny jurisdiction rules). Version
      * guard prevents concurrent lost updates.
