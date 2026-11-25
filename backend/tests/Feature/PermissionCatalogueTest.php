@@ -62,6 +62,33 @@ final class PermissionCatalogueTest extends TestCase
         $this->assertNotSame($before, PermissionCatalogue::revision());
     }
 
+    /**
+     * A nullable workspace means different things as null (action-only) versus an empty string,
+     * so the revision must distinguish them rather than collapsing both to the empty token.
+     */
+    public function test_revision_distinguishes_a_null_workspace_from_an_empty_one(): void
+    {
+        $id = DB::table('permission_applicability')->whereNotNull('workspace')->value('permission_id');
+        if ($id === null) {
+            $id = DB::table('permission_applicability')->value('permission_id');
+        }
+        DB::table('permission_applicability')->where('permission_id', $id)->update(['workspace' => null]);
+        $nullRevision = PermissionCatalogue::revision();
+
+        DB::table('permission_applicability')->where('permission_id', $id)->update(['workspace' => '']);
+        $this->assertNotSame($nullRevision, PermissionCatalogue::revision(),
+            'a null and an empty-string workspace are different states and must hash differently');
+    }
+
+    /** The revision is a stable, deterministic string of consistent length. */
+    public function test_revision_is_a_stable_deterministic_string(): void
+    {
+        $first = PermissionCatalogue::revision();
+        $this->assertIsString($first);
+        $this->assertSame(64, strlen($first), 'a SHA-256 hex digest is 64 characters');
+        $this->assertSame($first, PermissionCatalogue::revision(), 'stable across repeated calls');
+    }
+
     public function test_catalogue_is_shared_but_applicability_is_independent(): void
     {
         $this->assertSame(PermissionCatalogue::actions('Shop'), PermissionCatalogue::actions('Distributor'));
