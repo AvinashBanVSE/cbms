@@ -120,6 +120,28 @@ final class AuthorizationEvaluator
         }
 
         $kind = (string) $business->kind;
+
+        // Fail closed on mandatory contextual boundaries before considering any grant. A direct
+        // customer_permissions row is not self-sufficient authority: the role path reaches here
+        // already gated by permissionsFor()'s membership/association/scope/lifecycle closure, so
+        // without this gate a raw grant for an inactive account, a lapsed association or a
+        // non-operational business would be allowed where the role path would deny it. Absence of
+        // eligibility denies every action for this entity, matching the approved rule that no grant
+        // overrides missing associations, inactive accounts, or mandatory policies (D1).
+        $eligibility = app(EntityRoleAccess::class);
+        if (! $eligibility->eligible($user, $businessId)) {
+            return new AuthorizationDecision(
+                businessId: $businessId,
+                kind: $kind,
+                allowed: [],
+                denied: [],
+                denyReasons: [],
+                precedence: [],
+                source: 'ineligible_context',
+                catalogueVersion: PermissionCatalogue::revision(),
+            );
+        }
+
         $version = PermissionCatalogue::revision();
 
         $direct = DB::table('customer_permissions')

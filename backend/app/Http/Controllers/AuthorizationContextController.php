@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\AuthorizationEvaluator;
 use App\Authorization\CustomerPermissionGrants;
+use App\Authorization\PermissionCatalogue;
 use App\Authorization\ProviderAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -46,7 +47,7 @@ final class AuthorizationContextController
             'session_valid' => ($account?->state ?? null) === 'Active',
             'decisions' => $decisions,
             'provider_directory' => $providers->directoryFor($id),
-            'catalogue_version' => (int) (DB::table('permission_definitions')->where('active', true)->max('version') ?? 0),
+            'catalogue_version' => PermissionCatalogue::revision(),
         ])->header('Cache-Control', 'no-store');
     }
 }

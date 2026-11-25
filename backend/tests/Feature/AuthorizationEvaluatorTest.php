@@ -69,7 +69,6 @@ final class AuthorizationEvaluatorTest extends TestCase
         $unknown = $evaluator->decide($id, (string) Str::uuid7());
         $this->assertSame([], $unknown->allowed);
         $this->assertSame('unknown_business', $unknown->source);
-
         // An expired deny no longer suppresses the granted action.
         DB::table('entity_permission_denies')
             ->where('business_id', $shop)->where('user_id', $id)
@@ -114,5 +113,55 @@ final class AuthorizationEvaluatorTest extends TestCase
         $min = DB::table('permission_definitions')->where('active', true)->orderBy('version')->first();
         DB::table('permission_definitions')->where('id', $min->id)->update(['version' => (int) $min->version + 1]);
         $this->assertNotSame($stale, $evaluator->versionKey($shop));
+    }
+
+    /** Finding 5.1: a direct grant is not self-sufficient authority without eligibility. */
+    public function test_direct_grant_is_denied_when_context_is_ineligible(): void
+    {
+        $portal = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $portal, 'kind' => 'Main Portal', 'professional_name' => 'MP']);
+        DB::table('portal_installation')->where('id', 1)->update(['portal_id' => $portal, 'stage' => 'ready']);
+        $shop = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $shop, 'kind' => 'Shop', 'professional_name' => 'Shop', 'parent_id' => $portal]);
+        $tenant = (string) Str::uuid7();
+        DB::table('customer_tenants')->insert(['id' => $tenant, 'organization_id' => $portal, 'provider_id' => $portal]);
+        $id = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $id, 'code' => 'EV0002', 'email' => 'ev2@test.invalid', 'password' => 'unused']);
+        DB::table('customer_accounts')->insert(['user_id' => $id, 'tenant_id' => $tenant, 'state' => 'Active']);
+
+        // A raw direct grant for a Shop the user has NO association/scope with. Eligibility must
+        // gate it: no grant overrides a missing association or scope (D1).
+        DB::table('customer_permissions')->insert(['user_id' => $id, 'business_id' => $shop, 'action' => 'mapping.initiate']);
+        $decision = (new AuthorizationEvaluator)->decide($id, $shop);
+        $this->assertSame([], $decision->allowed, 'no association/scope => ineligible, deny');
+        $this->assertSame('ineligible_context', $decision->source);
+
+        // Supplying association + scope makes the same grant take effect.
+        DB::table('customer_business_associations')->insert(['user_id' => $id, 'business_id' => $shop, 'active' => true]);
+        DB::table('customer_business_scopes')->insert(['user_id' => $id, 'business_id' => $shop]);
+        $this->assertContains('mapping.initiate', (new AuthorizationEvaluator)->decide($id, $shop)->allowed);
+    }
+
+    /** An inactive business denies every action (§6 lifecycle boundary). */
+    public function test_inactive_business_denies_regardless_of_grants(): void
+    {
+        $portal = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $portal, 'kind' => 'Main Portal', 'professional_name' => 'MP']);
+        DB::table('portal_installation')->where('id', 1)->update(['portal_id' => $portal, 'stage' => 'ready']);
+        $shop = (string) Str::uuid7();
+        DB::table('business_identities')->insert(['id' => $shop, 'kind' => 'Shop', 'professional_name' => 'Shop', 'parent_id' => $portal]);
+        $tenant = (string) Str::uuid7();
+        DB::table('customer_tenants')->insert(['id' => $tenant, 'organization_id' => $portal, 'provider_id' => $portal]);
+        $id = (string) Str::uuid7();
+        DB::table('users')->insert(['id' => $id, 'code' => 'EV0003', 'email' => 'ev3@test.invalid', 'password' => 'unused']);
+        DB::table('customer_accounts')->insert(['user_id' => $id, 'tenant_id' => $tenant, 'state' => 'Active']);
+        DB::table('customer_business_associations')->insert(['user_id' => $id, 'business_id' => $shop, 'active' => true]);
+        DB::table('customer_business_scopes')->insert(['user_id' => $id, 'business_id' => $shop]);
+        DB::table('customer_permissions')->insert(['user_id' => $id, 'business_id' => $shop, 'action' => 'mapping.initiate']);
+
+        DB::table('business_identities')->where('id', $shop)->update(['operational_state' => 'Inactive']);
+        $decision = (new AuthorizationEvaluator)->decide($id, $shop);
+        $this->assertSame([], $decision->allowed);
+        $this->assertSame('ineligible_context', $decision->source);
     }
 }
